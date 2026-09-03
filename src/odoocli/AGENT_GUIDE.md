@@ -14,7 +14,21 @@ Resolution order, first match wins:
 
 Nothing resolved: exit code 3 and a message listing these three ways. The CLI never prompts.
 `ODOO_API_KEY` accepts an Odoo API key (preferred) or the user's password.
-Check a connection with `odoo info`.
+Check a connection with `odoo info`. Self-signed on-prem server: `--insecure`
+(or `odoo profile add ... --no-verify-ssl`).
+
+## Context: archived records, company, language
+
+Odoo hides archived records (`active = false`) from every search unless the context says
+otherwise, and multi-company data depends on the company in context. These global flags
+work on every command:
+
+```
+--include-archived        context active_test=false: search also returns archived records
+--company 3               context allowed_company_ids=[3]
+--lang fr_BE              labels and selection values in that language
+--context '{"tz": "Europe/Brussels"}'   any other key, merged with the flags above
+```
 
 ## Output contract
 
@@ -36,7 +50,7 @@ odoo info [--modules]                       server version, uid, optional instal
 odoo models [--like sale]                   list models (technical name, label)
 odoo fields MODEL [--type many2one] [--stored] [--search text] [--all-attributes]
 odoo search MODEL [-w COND]... [--domain JSON] [--fields a,b] [--limit N] [--offset N]
-                  [--order "x desc"] [--all] [--lenient-fields]
+                  [--order "x desc"] [--all] [--ids-only] [--lenient-fields]
 odoo count MODEL [-w COND]... [--domain JSON]
 odoo read MODEL ID [ID...] [--fields a,b]
 ```
@@ -71,6 +85,16 @@ odoo call MODEL METHOD [--ids 1,2] [--args JSON] [--kwargs JSON] [--yes] [--dry-
 - Every executed write logs one line on stderr:
   `{"write": {"model": ..., "method": ..., "ids": [...], "fields": [...]}}`.
 
+One2many and many2many fields take Odoo commands, written as JSON in `-v` or `--values`:
+
+```
+-v 'order_line=[[0,0,{"product_id":7,"product_uom_qty":2}]]'   create a line
+-v 'tag_ids=[[4,12]]'                                           link id 12
+-v 'tag_ids=[[6,0,[12,13]]]'                                    replace with ids 12 and 13
+-v 'tag_ids=[[3,12]]'                                           unlink id 12 (keep record)
+-v 'order_line=[[2,55]]'                                        delete line 55
+```
+
 ## Working method that avoids most failures
 
 1. Unknown model? `odoo fields MODEL` first. It shows `type`, `required`, `store`, `relation`
@@ -79,7 +103,7 @@ odoo call MODEL METHOD [--ids 1,2] [--args JSON] [--kwargs JSON] [--yes] [--dry-
    (`qty_available`, `amount_to_invoice`, ...) can be read but not searched; Odoo answers
    "Cannot convert ... to SQL". Read them and filter client-side.
 3. `odoo count` before a wide `odoo search`. Default `--limit` is 80. `--all` paginates
-   everything; prefer `--format jsonl` with it.
+   everything; prefer `--format jsonl` with it. `--ids-only` when you only need ids.
 4. Ask only for the fields you need with `--fields`. `search` without `--fields` returns
    every field, which is slow and noisy.
 5. Many2one values come back as `[id, name]`. Filter on them with the id
@@ -92,6 +116,11 @@ odoo call MODEL METHOD [--ids 1,2] [--args JSON] [--kwargs JSON] [--yes] [--dry-
 8. Never guess a model name: `odoo models --like invoice`.
 9. Sensitive models (`ir.config_parameter`, `ir.mail_server`, `res.users.apikeys`, `ir.cron`,
    `ir.actions.server`, ...) are refused unless `--include-sensitive`.
+10. A record you know exists but cannot find is usually archived (`--include-archived`) or in
+    another company (`--company`). `odoo read` exits 1 with `missing_record` in that case.
+11. Something odd on the wire? `--debug` logs every RPC call (method, duration, retries) as
+    JSON lines on stderr. Network errors and HTTP 5xx are retried for reads only; a write that
+    timed out is reported, never replayed.
 
 ## Recipes
 
@@ -104,4 +133,6 @@ odoo call res.partner name_search --args '["acme"]' --kwargs '{"limit": 5}'
 odoo call account.move read_group --kwargs '{"domain": [["move_type","=","out_invoice"]], "fields": ["amount_total:sum"], "groupby": ["partner_id"]}'
 odoo create crm.lead -v name="Website inquiry" -v partner_id=42 --dry-run
 odoo call sale.order action_confirm --ids 12 --yes
+odoo call sale.order action_cancel --ids 12 --yes --context '{"disable_cancel_warning": true}'
+odoo search res.partner -w name~acme --include-archived --ids-only
 ```

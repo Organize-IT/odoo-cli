@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +20,10 @@ ENV_CONFIG = "ODOO_CONFIG"
 ENV_ALLOW_WRITES = "ODOO_ALLOW_WRITES"
 ENV_ALLOW_SENSITIVE = "ODOO_ALLOW_SENSITIVE"
 ENV_ASSUME_YES = "ODOO_ASSUME_YES"
+ENV_VERIFY_SSL = "ODOO_VERIFY_SSL"
 
 _TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"0", "false", "no", "off"}
 
 NO_CONNECTION_HELP = (
     "No Odoo connection configured. Use one of:\n"
@@ -37,14 +39,19 @@ class Profile:
     url: str
     database: str
     login: str
-    api_key: str
+    api_key: str = field(repr=False)
     allow_writes: bool = False
     allow_sensitive: bool = False
+    verify_ssl: bool = True
     source: str = "env"
 
 
 def env_flag(env: Mapping[str, str], name: str) -> bool:
     return env.get(name, "").strip().lower() in _TRUE
+
+
+def env_flag_default_true(env: Mapping[str, str], name: str) -> bool:
+    return env.get(name, "").strip().lower() not in _FALSE
 
 
 def config_path(env: Mapping[str, str]) -> Path:
@@ -121,6 +128,7 @@ def profile_from_dict(name: str, data: Mapping[str, Any], env: Mapping[str, str]
         api_key=str(api_key),
         allow_writes=bool(data.get("allow_writes", False)),
         allow_sensitive=bool(data.get("allow_sensitive", False)),
+        verify_ssl=bool(data.get("verify_ssl", True)),
         source=f"profile:{name}",
     )
 
@@ -134,6 +142,7 @@ def _from_env(env: Mapping[str, str]) -> Profile:
         api_key=env[ENV_KEY],
         allow_writes=env_flag(env, ENV_ALLOW_WRITES),
         allow_sensitive=env_flag(env, ENV_ALLOW_SENSITIVE),
+        verify_ssl=env_flag_default_true(env, ENV_VERIFY_SSL),
         source="env",
     )
 

@@ -18,3 +18,11 @@ def test_sync_client_close_is_idempotent(fake_odoo: FakeOdoo) -> None:
     c.version()
     c.close()
     c.close()
+
+
+def test_sync_search_and_context(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on("res.partner", "search", [5])
+    with OdooClient(BASE_URL, DB, LOGIN, KEY, context={"lang": "fr_BE"}) as c:
+        c.context["active_test"] = False
+        assert c.search("res.partner", []) == [5]
+    assert fake_odoo.calls[0][3]["context"] == {"lang": "fr_BE", "active_test": False}

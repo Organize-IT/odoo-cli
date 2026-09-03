@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
 import os
 import sys
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
@@ -26,8 +28,25 @@ T = TypeVar("T")
 # Root options that may appear anywhere on the command line. Agents naturally
 # write ``odoo search res.partner --format jsonl``; click only accepts group
 # options before the subcommand, so we hoist them.
-_GLOBAL_WITH_VALUE = {"--profile", "-p", "--format", "-f", "--timeout"}
-_GLOBAL_FLAGS = {"--no-redact", "--include-sensitive", "--verbose", "--version"}
+_GLOBAL_WITH_VALUE = {
+    "--profile",
+    "-p",
+    "--format",
+    "-f",
+    "--timeout",
+    "--context",
+    "--company",
+    "--lang",
+}
+_GLOBAL_FLAGS = {
+    "--no-redact",
+    "--include-sensitive",
+    "--include-archived",
+    "--insecure",
+    "--verbose",
+    "--debug",
+    "--version",
+}
 
 
 def hoist_global_options(args: list[str]) -> list[str]:
@@ -85,6 +104,9 @@ class Session:
     timeout: float
     verbose: bool
     assume_yes: bool
+    context: dict[str, Any] = field(default_factory=dict)
+    verify_ssl: bool = True
+    debug: bool = False
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     config: Path = field(default_factory=lambda: config_path(os.environ))
 
@@ -125,6 +147,26 @@ def _root(
     verbose: bool = typer.Option(
         False, "--verbose", help="Include the Odoo debug payload in errors."
     ),
+    context: str | None = typer.Option(
+        None,
+        "--context",
+        help='Odoo context as JSON, e.g. \'{"lang": "fr_BE"}\'. Merged into every call.',
+    ),
+    include_archived: bool = typer.Option(
+        False, "--include-archived", help="Also match archived records (context active_test=false)."
+    ),
+    company: int | None = typer.Option(
+        None, "--company", help="Company id to operate in (context allowed_company_ids)."
+    ),
+    lang: str | None = typer.Option(None, "--lang", help="Language code for labels, e.g. fr_BE."),
+    insecure: bool = typer.Option(
+        False, "--insecure", help="Skip TLS certificate verification (self-signed on-prem)."
+    ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Log every RPC call (method, id, duration, retries) as JSON on stderr.",
+    ),
     _version: bool = typer.Option(
         False, "--version", callback=_version_callback, is_eager=True, help="Print version."
     ),
@@ -139,7 +181,66 @@ def _root(
         timeout=timeout,
         verbose=verbose,
         assume_yes=env_flag(os.environ, ENV_ASSUME_YES),
+        context=build_context(context, include_archived, company, lang),
+        verify_ssl=not insecure,
+        debug=debug,
     )
+
+
+def build_context(
+    context_json: str | None, include_archived: bool, company: int | None, lang: str | None
+) -> dict[str, Any]:
+    """Compose the Odoo context from the convenience flags; explicit JSON keys come first."""
+    ctx: dict[str, Any] = {}
+    if context_json:
+        try:
+            parsed = json.loads(context_json)
+        except ValueError as e:
+            raise typer.BadParameter(f"--context must be a JSON object: {e}") from e
+        if not isinstance(parsed, dict):
+            raise typer.BadParameter("--context must be a JSON object")
+        ctx.update(parsed)
+    if lang:
+        ctx["lang"] = lang
+    if company is not None:
+        ctx["allowed_company_ids"] = [company]
+    if include_archived:
+        ctx["active_test"] = False
+    return ctx
+
+
+class _JsonLineFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps(
+            {
+                "log": {
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": record.getMessage(),
+                }
+            },
+            ensure_ascii=False,
+        )
+
+
+@contextlib.contextmanager
+def debug_logging(enabled: bool) -> Iterator[None]:
+    """Attach a JSON-lines stderr handler to the ``odoocli`` logger for one command."""
+    if not enabled:
+        yield
+        return
+    root = logging.getLogger("odoocli")
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(_JsonLineFormatter())
+    previous_level = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    try:
+        yield
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous_level)
+        handler.flush()
 
 
 def session(ctx: typer.Context) -> Session:
@@ -199,12 +300,19 @@ def run(ctx: typer.Context, fn: Callable[[AsyncOdooClient, Profile], Awaitable[T
     async def _go() -> T:
         profile = sess.profile()
         async with AsyncOdooClient(
-            profile.url, profile.database, profile.login, profile.api_key, timeout=sess.timeout
+            profile.url,
+            profile.database,
+            profile.login,
+            profile.api_key,
+            timeout=sess.timeout,
+            verify_ssl=sess.verify_ssl and profile.verify_ssl,
+            context=sess.context,
         ) as client:
             return await fn(client, profile)
 
     try:
-        return asyncio.run(_go())
+        with debug_logging(sess.debug):
+            return asyncio.run(_go())
     except OdooError as e:
         fail(e, sess.verbose)
         raise AssertionError("unreachable") from e

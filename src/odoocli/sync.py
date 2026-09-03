@@ -68,6 +68,11 @@ class OdooClient:
     def uid(self) -> int | None:
         return self._async.uid
 
+    @property
+    def context(self) -> dict[str, Any]:
+        """Client-wide Odoo context, merged into every call (mutable)."""
+        return self._async.context
+
     def version(self) -> dict[str, Any]:
         return self._run(self._async.version())
 
@@ -76,6 +81,16 @@ class OdooClient:
 
     def execute(self, model: str, method: str, *args: Any, **kwargs: Any) -> Any:
         return self._run(self._async.execute(model, method, *args, **kwargs))
+
+    def search(
+        self,
+        model: str,
+        domain: Domain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        order: str | None = None,
+    ) -> list[int]:
+        return self._run(self._async.search(model, domain, limit, offset, order))
 
     def search_read(
         self,

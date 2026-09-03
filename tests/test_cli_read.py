@@ -225,3 +225,70 @@ def test_hoist_stops_at_double_dash() -> None:
         "-f",
         "raw",
     ]
+
+
+def test_context_flags_reach_odoo(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on("res.partner", "search_read", [])
+    r = invoke(
+        "search",
+        "res.partner",
+        "--include-archived",
+        "--company",
+        "3",
+        "--lang",
+        "fr_BE",
+        "--context",
+        '{"tz": "Europe/Brussels", "lang": "en_US"}',
+    )
+    assert r.exit_code == 0, r.stderr
+    assert fake_odoo.calls[-1][3]["context"] == {
+        "tz": "Europe/Brussels",
+        "lang": "fr_BE",
+        "allowed_company_ids": [3],
+        "active_test": False,
+    }
+
+
+def test_bad_context_exit_2(fake_odoo: FakeOdoo) -> None:
+    assert invoke("count", "res.partner", "--context", "[1]").exit_code == 2
+
+
+def test_search_ids_only(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on("res.partner", "search", [4, 9])
+    r = invoke("search", "res.partner", "-w", "is_company=true", "--ids-only", "--limit", "5")
+    assert json.loads(r.stdout) == [4, 9]
+    assert fake_odoo.calls[-1][1] == "search" and fake_odoo.calls[-1][3]["limit"] == 5
+
+
+def test_read_missing_id_exit_1(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on("res.partner", "read", [{"id": 1, "name": "A"}])
+    r = invoke("read", "res.partner", "1,999")
+    assert r.exit_code == 1
+    err = json.loads(r.stderr)["error"]
+    assert err["code"] == "missing_record" and "999" in err["message"]
+
+
+def test_debug_logs_rpc_as_json_lines(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on("res.partner", "search_count", 2)
+    r = invoke("count", "res.partner", "--debug")
+    assert r.exit_code == 0 and r.stdout.strip() == "2"
+    lines = [json.loads(line) for line in r.stderr.splitlines()]
+    assert any("res.partner.search_count" in line["log"]["message"] for line in lines)
+    assert all(line["log"]["logger"].startswith("odoocli") for line in lines)
+
+
+def test_insecure_flag_disables_verify(fake_odoo: FakeOdoo, monkeypatch: Any) -> None:
+    import odoocli.cli.app as app_module
+    from odoocli.client import AsyncOdooClient as real
+
+    seen: dict[str, Any] = {}
+
+    class Spy(real):
+        def __init__(self, *a: Any, **k: Any) -> None:
+            seen.update(k)
+            super().__init__(*a, **k)
+
+    monkeypatch.setattr(app_module, "AsyncOdooClient", Spy)
+    fake_odoo.on("res.partner", "search_count", 0)
+    assert invoke("count", "res.partner", "--insecure").exit_code == 0
+    assert seen["verify_ssl"] is False

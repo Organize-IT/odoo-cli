@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "odoocli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Odoo JSON-RPC CLI and Python client built for AI agents and scripts."
 readme = "README.md"
 license = "MIT"
