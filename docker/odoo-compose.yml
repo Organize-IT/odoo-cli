@@ -1,0 +1,26 @@
+# Throwaway Odoo for integration tests. ODOO_VERSION selects the image tag.
+#   scripts/start-odoo.sh            # init db "test" and start
+#   docker compose -f docker/odoo-compose.yml down -v
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo"]
+      interval: 2s
+      retries: 30
+  odoo:
+    image: odoo:${ODOO_VERSION:-17.0}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      HOST: db
+      USER: odoo
+      PASSWORD: odoo
+    ports:
+      - "8069:8069"
+    command: ["odoo", "-d", "test", "--db-filter=^test$"]

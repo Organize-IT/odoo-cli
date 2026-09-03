@@ -227,6 +227,3 @@ def main() -> None:
 
 # Command modules register themselves on ``app``; imported last to avoid cycles.
 from odoocli.cli import guide_cmd, profile_cmds, read_cmds, write_cmds  # noqa: E402,F401
-
-if __name__ == "__main__":  # python -m odoocli.cli.app
-    main()
