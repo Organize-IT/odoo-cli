@@ -60,6 +60,9 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP", "ARG", "SIM"]
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ARG001"]  # pytest fixtures are used for their side effects
 
