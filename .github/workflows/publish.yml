@@ -19,7 +19,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Trusted publishing: declare this repo + workflow + environment on pypi.org
-    # under the "odoocli" project. No API token is stored anywhere.
+    # under the "odoo-agent-cli" project. No API token is stored anywhere.
     environment: pypi
     permissions:
       id-token: write

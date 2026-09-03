@@ -21,7 +21,7 @@ dependency on UpBoard: no tenant, no database, no Redis, no quota, no cache.
 |---|---|
 | 1 | Audience: agents (Claude Code and similar) and scripts. Externalised, reusable across projects. |
 | 2 | Separate repo. UpBoard keeps its own connector for now; a later lot makes UpBoard depend on this package. |
-| 3 | Public, MIT. Repo `Organize-IT/odoo-cli`, PyPI `odoocli`, binary `odoo`. Not affiliated with Odoo S.A. |
+| 3 | Public, MIT. Repo `Organize-IT/odoo-cli`, PyPI `odoo-agent-cli` (renamed from `odoocli`: PyPI treats it as too similar to `odoo-cli`), import `odoocli`, binary `odoo`. Not affiliated with Odoo S.A. |
 | 4 | Connection resolution: `--profile` > `ODOO_PROFILE` > env `ODOO_URL/ODOO_DB/ODOO_LOGIN/ODOO_API_KEY` > profile `default`. No source resolved: refuse with exit code 3 and a message listing the three means. Never prompt. |
 | 5 | Writes (`create`, `write`, `unlink`, `call` with a non read-safe method) exist only when the profile or env sets `allow_writes`. `unlink` and non read-safe `call` also need `--yes` (or `ODOO_ASSUME_YES=1`). `--dry-run` prints the payload and exits 0. Every executed write logs one JSON line on stderr. |
 | 6 | Output: raw Odoo data, no envelope, never humanised. stdout is JSON when not a TTY, table when a TTY. `--format json\|jsonl\|table\|csv` forces. Errors: one JSON object on stderr. Exit codes: 0 ok, 1 Odoo error, 2 usage, 3 connection/auth, 4 refused (writes disabled, missing `--yes`, sensitive model). Sensitive field values redacted by default, `--no-redact` disables. |

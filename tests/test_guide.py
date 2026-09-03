@@ -27,4 +27,4 @@ def test_agent_guide_command_prints_guide() -> None:
 
 def test_version_flag() -> None:
     result = CliRunner().invoke(app, ["--version"])
-    assert result.exit_code == 0 and "odoocli" in result.stdout
+    assert result.exit_code == 0 and "odoo-agent-cli" in result.stdout

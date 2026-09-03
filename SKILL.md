@@ -1,6 +1,6 @@
 ---
 name: odoo-cli
-description: Use when a task needs to read or change data in an Odoo ERP (partners, invoices, orders, stock, any model) through the `odoo` command line tool from the odoocli package. Covers connection setup, domain syntax, guarded writes, output contract and version-drift pitfalls.
+description: Use when a task needs to read or change data in an Odoo ERP (partners, invoices, orders, stock, any model) through the `odoo` command line tool from the odoo-agent-cli package (import name odoocli). Covers connection setup, domain syntax, guarded writes, output contract and version-drift pitfalls.
 ---
 
 # odoo CLI guide for AI agents

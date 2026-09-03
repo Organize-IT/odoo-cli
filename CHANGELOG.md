@@ -23,6 +23,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Distribution renamed to `odoo-agent-cli` (PyPI rejects `odoocli` as too similar to the
+  abandoned `odoo-cli`). Import name `odoocli` and binary `odoo` are unchanged.
 - `max_retries_429` renamed to `max_retries` on the clients (unreleased API).
 
 ## [0.1.0] - 2026-09-03

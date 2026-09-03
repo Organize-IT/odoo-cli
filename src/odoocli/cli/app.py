@@ -116,7 +116,7 @@ class Session:
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"odoo (odoocli) {__version__}")
+        typer.echo(f"odoo {__version__} (odoo-agent-cli)")
         raise typer.Exit()
 
 

@@ -1,4 +1,4 @@
-# odoocli
+# odoo-agent-cli
 
 Odoo JSON-RPC command line tool and Python client, built for AI agents and scripts.
 
@@ -12,7 +12,7 @@ Odoo S.A.
 ## Install
 
 ```bash
-uv tool install odoocli        # or: pipx install odoocli
+uv tool install odoo-agent-cli   # or: pipx install odoo-agent-cli
 odoo --version
 ```
 
@@ -123,6 +123,8 @@ are refused unless `--include-sensitive`.
   stderr. Exploration only.
 
 ## Library
+
+The distribution is `odoo-agent-cli`; the import name is `odoocli`.
 
 ```python
 from odoocli import OdooClient
