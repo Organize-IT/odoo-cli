@@ -31,7 +31,8 @@ work on every command:
 ```
 --include-archived        context active_test=false: search also returns archived records
 --company 3               context allowed_company_ids=[3]
---lang fr_BE              labels and selection values in that language
+--lang fr_BE              labels and selection values in that language (must be installed
+                          in Odoo: 18+ answers "Invalid language code" otherwise)
 --context '{"tz": "Europe/Brussels"}'   any other key, merged with the flags above
 ```
 

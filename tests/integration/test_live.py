@@ -92,8 +92,8 @@ def test_cli_write_cycle() -> None:
     assert json.loads(ids.stdout) == []
     ids = cli("search", "res.partner", "-w", f"id={new_id}", "--ids-only", "--include-archived")
     assert json.loads(ids.stdout) == [new_id]
-    # Labels follow --lang through the context.
-    lang = cli("fields", "res.partner", "--search", "name", "--lang", "fr_FR", "--debug")
+    # Context flows through (en_US is always installed; Odoo 18+ rejects unknown codes).
+    lang = cli("fields", "res.partner", "--search", "name", "--lang", "en_US", "--debug")
     assert lang.returncode == 0 and '"log"' in lang.stderr
     assert cli("unlink", "res.partner", str(new_id)).returncode == 4
     assert cli("unlink", "res.partner", str(new_id), "--yes").returncode == 0
