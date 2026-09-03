@@ -38,6 +38,9 @@ def profile_add(
     allow_sensitive: bool = typer.Option(
         False, "--allow-sensitive", help="Allow sensitive models on this profile."
     ),
+    no_verify_ssl: bool = typer.Option(
+        False, "--no-verify-ssl", help="Skip TLS verification (self-signed on-prem)."
+    ),
     test: bool = typer.Option(False, "--test", help="Run 'odoo info' with the new profile."),
 ) -> None:
     """Add or replace a profile."""
@@ -55,6 +58,7 @@ def profile_add(
             "api_key_env": api_key_env,
             "allow_writes": allow_writes,
             "allow_sensitive": allow_sensitive,
+            "verify_ssl": False if no_verify_ssl else None,
         },
     )
     if test:
@@ -78,6 +82,7 @@ def profile_list(ctx: typer.Context) -> None:
                 "key": key,
                 "allow_writes": bool(data.get("allow_writes", False)),
                 "allow_sensitive": bool(data.get("allow_sensitive", False)),
+                "verify_ssl": bool(data.get("verify_ssl", True)),
             }
         )
     emit(ctx, rows)

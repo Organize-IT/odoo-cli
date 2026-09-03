@@ -86,6 +86,16 @@ def test_cli_write_cycle() -> None:
     assert got[0]["ref"] == "ODOOCLI"
     ns = cli("call", "res.partner", "name_search", "--args", '["odoocli integration"]')
     assert ns.returncode == 0 and any(r[0] == new_id for r in json.loads(ns.stdout))
+    # Archived records disappear from search unless --include-archived is given.
+    assert cli("write", "res.partner", str(new_id), "-v", "active=false").returncode == 0
+    ids = cli("search", "res.partner", "-w", f"id={new_id}", "--ids-only")
+    assert json.loads(ids.stdout) == []
+    ids = cli("search", "res.partner", "-w", f"id={new_id}", "--ids-only", "--include-archived")
+    assert json.loads(ids.stdout) == [new_id]
+    # Labels follow --lang through the context.
+    lang = cli("fields", "res.partner", "--search", "name", "--lang", "fr_FR", "--debug")
+    assert lang.returncode == 0 and '"log"' in lang.stderr
     assert cli("unlink", "res.partner", str(new_id)).returncode == 4
     assert cli("unlink", "res.partner", str(new_id), "--yes").returncode == 0
     assert cli("count", "res.partner", "-w", f"id={new_id}").stdout.strip() == "0"
+    assert cli("read", "res.partner", str(new_id)).returncode == 1

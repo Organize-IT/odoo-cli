@@ -11,6 +11,7 @@ from odoocli.cli.values import parse_ids, split_fields
 from odoocli.client import AsyncOdooClient
 from odoocli.config import Profile
 from odoocli.domain import build_domain
+from odoocli.errors import OdooMissingError
 from odoocli.lenient import lenient_search_read
 
 DEFAULT_LIMIT = 80
@@ -138,6 +139,9 @@ def search(
     lenient: bool = typer.Option(
         False, "--lenient-fields", help="Drop fields Odoo rejects and retry (warns on stderr)."
     ),
+    ids_only: bool = typer.Option(
+        False, "--ids-only", help="Return matching ids only (ORM search instead of search_read)."
+    ),
 ) -> None:
     """search_read on a model. Output is the raw Odoo result."""
     sess = session(ctx)
@@ -151,10 +155,18 @@ def search(
             )
         return await client.search_read(model, dom, flds, lim, off, order)
 
-    async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
+    async def go(client: AsyncOdooClient, profile: Profile) -> list[Any]:
         check_model(sess, profile, model)
         dom = build_domain(domain, where)
         flds = split_fields(fields_)
+        if ids_only:
+            return await client.search(
+                model,
+                dom,
+                None if all_ else (DEFAULT_LIMIT if limit is None else limit),
+                offset,
+                order,
+            )
         if not all_:
             return await fetch(client, dom, flds, DEFAULT_LIMIT if limit is None else limit, offset)
         rows: list[dict[str, Any]] = []
@@ -193,11 +205,19 @@ def read(
     ids: list[str] = typer.Argument(..., help="Record ids, space or comma separated."),
     fields_: str | None = FieldsOpt,
 ) -> None:
-    """Read records by id."""
+    """Read records by id. Exit 1 (missing_record) if any id is missing or not visible."""
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
         check_model(sess, profile, model)
-        return await client.read(model, parse_ids(ids), split_fields(fields_))
+        id_list = parse_ids(ids)
+        rows = await client.read(model, id_list, split_fields(fields_))
+        missing = [i for i in id_list if i not in {r.get("id") for r in rows}]
+        if missing:
+            raise OdooMissingError(
+                f"{model} records not found or not visible: {missing}",
+                data={"missing_ids": missing, "records": rows},
+            )
+        return rows
 
     emit(ctx, run(ctx, go))

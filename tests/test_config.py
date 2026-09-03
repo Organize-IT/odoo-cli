@@ -114,3 +114,21 @@ def test_profile_missing_api_key_env(tmp_path: Path) -> None:
     )
     with pytest.raises(OdooConnectionError, match="NOPE"):
         resolve_profile("acme", {}, path)
+
+
+def test_verify_ssl_from_env_and_profile(tmp_path: Path) -> None:
+    assert resolve_profile(None, ENV_FULL, tmp_path / "n.toml").verify_ssl is True
+    env = {**ENV_FULL, "ODOO_VERIFY_SSL": "false"}
+    assert resolve_profile(None, env, tmp_path / "n.toml").verify_ssl is False
+    path = tmp_path / "config.toml"
+    save_profile(
+        path,
+        "onprem",
+        {"url": "https://x", "database": "d", "login": "l", "api_key": "k", "verify_ssl": False},
+    )
+    assert resolve_profile("onprem", {}, path).verify_ssl is False
+
+
+def test_profile_repr_hides_api_key(tmp_path: Path) -> None:
+    p = resolve_profile(None, ENV_FULL, tmp_path / "n.toml")
+    assert "api_key" not in repr(p) and ENV_FULL["ODOO_API_KEY"] not in repr(p)

@@ -66,8 +66,17 @@ Nothing found: exit code 3 with a message listing those three ways. A profile st
 
 Data is never humanised: many2one fields stay `[id, "name"]`, empty values stay `false`.
 Values of fields named like `password`, `api_key`, `secret` are `[redacted]` unless
-`--no-redact`. Global options (`--format`, `--profile`, `--timeout`, ...) are accepted anywhere
-on the command line.
+`--no-redact`. Global options are accepted anywhere on the command line:
+
+| Option | Effect |
+|---|---|
+| `--profile/-p NAME`, `--format/-f FMT`, `--timeout S` | connection, output, per-call timeout |
+| `--include-archived` | context `active_test=false`: searches also return archived records |
+| `--company ID`, `--lang CODE`, `--context JSON` | Odoo context merged into every call |
+| `--insecure` | skip TLS verification (self-signed on-prem) |
+| `--no-redact`, `--include-sensitive` | lift the two output/model guards |
+| `--debug` | one JSON line per RPC on stderr (method, id, duration, retries) |
+| `--verbose` | include Odoo's server traceback in error output |
 
 ## Conditions
 
@@ -139,9 +148,14 @@ async with AsyncOdooClient(url, db, login, key) as odoo:
 ```
 
 Exceptions: `OdooError` (base, `.code`, `.message`, `.data`), `OdooConnectionError`,
-`OdooAuthError`, `OdooAccessError`, `OdooValidationError`, `OdooMissingError`. HTTP 429 is
-retried with backoff and `Retry-After`. Domain helpers live in `odoocli.domain`, guards in
-`odoocli.security`, the opt-in repair loop in `odoocli.lenient`.
+`OdooAuthError`, `OdooAccessError`, `OdooValidationError`, `OdooMissingError`.
+
+Both clients accept `context={...}` (merged into every call; a per-call `context=` keyword
+wins), `verify_ssl=False` and `max_retries`. HTTP 429 is always retried with backoff and
+`Retry-After`; network errors, timeouts and HTTP 5xx are retried only for calls that cannot
+change data, so a `create` that timed out is never replayed. Logs go to the `odoocli.rpc`
+logger. Domain helpers live in `odoocli.domain`, guards in `odoocli.security`, the opt-in
+repair loop in `odoocli.lenient`.
 
 ## Development
 
