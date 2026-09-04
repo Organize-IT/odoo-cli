@@ -1,7 +1,9 @@
 import pytest
 
 from odoocli.domain import (
+    _dehumanize,
     build_domain,
+    dehumanize_operand,
     normalize_domain,
     parse_value,
     parse_where,
@@ -101,3 +103,11 @@ def test_build_domain_ands_json_and_where() -> None:
 def test_build_domain_rejects_invalid_json() -> None:
     with pytest.raises(OdooUsageError):
         build_domain("{not a list}", [])
+
+
+def test_dehumanize_operand_is_public() -> None:
+    assert dehumanize_operand("Acme (#42)") == 42
+    assert dehumanize_operand(["A (#1)", 2, "plain"]) == [1, 2, "plain"]
+    assert dehumanize_operand(False) is False
+    assert dehumanize_operand("ref (#7) extra") == "ref (#7) extra"
+    assert _dehumanize is dehumanize_operand  # 0.2.x compatibility alias
