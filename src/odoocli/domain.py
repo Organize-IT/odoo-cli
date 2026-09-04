@@ -48,13 +48,24 @@ def normalize_domain(domain: Any) -> list[Any]:
     return []
 
 
-def _dehumanize(value: Any) -> Any:
+def dehumanize_operand(value: Any) -> Any:
+    """Turn a humanised many2one display value back into its integer id.
+
+    LLM-facing layers often render relational fields as ``"Name (#42)"``.
+    When such a string is fed back as a domain operand, recover the trailing
+    ``(#42)`` as ``42``. Recurses into lists and tuples; anything else (plain
+    ints, ``False``, free text) is returned unchanged.
+    """
     if isinstance(value, str):
         m = _HUMANIZED_M2O_RE.search(value)
         return int(m.group(1)) if m else value
     if isinstance(value, list | tuple):
-        return [_dehumanize(v) for v in value]
+        return [dehumanize_operand(v) for v in value]
     return value
+
+
+# Backwards-compatible alias (0.2.x imported the private name). Remove in 1.0.
+_dehumanize = dehumanize_operand
 
 
 def sanitize_domain(domain: list[Any]) -> list[Any]:
@@ -64,7 +75,7 @@ def sanitize_domain(domain: list[Any]) -> list[Any]:
         if isinstance(item, list | tuple) and len(item) == 3:
             field, op, value = item
             if isinstance(field, str) and (field == "id" or field.endswith(("_id", "_ids"))):
-                value = _dehumanize(value)
+                value = dehumanize_operand(value)
             out.append([field, op, value])
         else:
             out.append(item)

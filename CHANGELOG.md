@@ -3,7 +3,14 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
-## [0.2.0] - unreleased
+## [0.3.0] - 2026-09-04
+
+### Added
+
+- `odoocli.domain.dehumanize_operand` is public: turns `"Name (#42)"` back into `42`
+  (recursing into lists). `_dehumanize` stays as a compatibility alias until 1.0.
+
+## [0.2.0] - 2026-09-03
 
 ### Added
 
