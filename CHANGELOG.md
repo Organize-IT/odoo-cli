@@ -3,6 +3,44 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.4.0] - 2026-09-10
+
+### Added
+
+- Field validation before the call. `fields_get` is read once per model, cached under
+  `~/.cache/odoo-cli` for 24 hours, and every field name used in `-w`, `--fields`,
+  `--order`, `-v` and `--by` is checked locally. An unknown name exits 2 with the closest
+  matches and nothing is sent; dotted paths are followed across relations and the error
+  names the model where the path broke. A computed non-stored field used in `-w` or
+  `--order` produces a `field_not_stored` warning on stderr. Disable with `--no-validate`
+  or `ODOO_NO_VALIDATE=1`; manage the cache with `odoo cache path|list|clear` and
+  `ODOO_CACHE_DIR` / `ODOO_SCHEMA_TTL`.
+- Model aliases on read commands: `odoo search invoices` is `account.move` filtered on
+  `move_type = out_invoice`. Presets usable wherever `-w` is accepted: `-w overdue`,
+  `-w unpaid`, `-w confirmed`, `-w archived`. `odoo alias [NAME] [--presets]` lists both
+  without a connection. Write commands refuse an alias that carries a filter
+  (`alias_not_writable`, exit 2).
+- `odoo group MODEL --by FIELD [--sum FIELDS] [--avg FIELDS]`: `read_group` with aliases,
+  presets and validation, so counts and totals per group no longer need `odoo call`.
+  Grouping keys accept a date granularity (`--by invoice_date:month`).
+- MkDocs site (getting started, six guides, mkdocstrings reference), built `--strict` in CI.
+- `AGENTS.md`: the authoritative specification of layering, contracts and definition of
+  done. `CONTRIBUTING.md` and a pull request template.
+
+### Fixed
+
+- Global option hoisting no longer steals a subcommand's value: `--order --lang` keeps
+  `--lang` as the value of `--order`. The mover now asks the invoked command which of its
+  options consume the next token.
+- Write guards run before any RPC, so a refused write leaves the server untouched.
+
+### Changed
+
+- `--dry-run` writes nothing, as before, but now reads the model schema to validate the
+  payload. It no longer claims to call nothing at all.
+- CI: actions pinned to commit digests, `contents: read` by default,
+  `persist-credentials: false`, coverage gated at 93%, dependabot and pre-commit added.
+
 ## [0.3.0] - 2026-09-04
 
 ### Added

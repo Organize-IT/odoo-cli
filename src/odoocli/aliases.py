@@ -113,9 +113,9 @@ _STATEFUL = ("account.move", "sale.order", "purchase.order")
 PRESETS: Mapping[str, Preset] = {
     "archived": Preset((("active", "=", False),), "Only archived records", _ANY),
     "active": Preset((("active", "=", True),), "Only active records", _ANY),
-    "draft": Preset((("state", "=", "draft"),), "state = draft", _STATEFUL),
-    "posted": Preset((("state", "=", "posted"),), "state = posted", ("account.move",)),
-    "cancelled": Preset((("state", "=", "cancel"),), "state = cancel", _STATEFUL),
+    "draft": Preset((("state", "=", "draft"),), "Not confirmed yet", _STATEFUL),
+    "posted": Preset((("state", "=", "posted"),), "Booked in the ledger", ("account.move",)),
+    "cancelled": Preset((("state", "=", "cancel"),), "Cancelled by a user", _STATEFUL),
     "unpaid": Preset(
         (("payment_state", "=", "not_paid"),), "Nothing received yet", ("account.move",)
     ),

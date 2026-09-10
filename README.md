@@ -26,12 +26,19 @@ export ODOO_URL=https://mycompany.odoo.com ODOO_DB=mycompany \
        ODOO_LOGIN=bot@mycompany.com ODOO_API_KEY=...   # API key or password
 
 odoo info                                  # version, uid, connection source
-odoo models --like invoice                 # find the right technical name
+odoo alias                                 # business names for models, and presets
+odoo models --like invoice                 # or find the technical name yourself
 odoo fields account.move --stored          # what you can filter and order on
-odoo count account.move -w move_type=out_invoice -w payment_state=not_paid
-odoo search account.move -w move_type=out_invoice -w invoice_date_due<2026-09-01 \
+odoo count invoices -w overdue
+odoo search invoices -w overdue \
      --fields name,partner_id,amount_residual --order "invoice_date_due" --limit 20
+odoo group invoices -w unpaid --by partner_id --sum amount_residual
 ```
+
+`invoices` is `account.move` filtered on `move_type = out_invoice`, and `overdue` is
+`payment_state = not_paid` past its due date. Both expand to an ordinary domain before
+anything is sent, and the technical names keep working. Full documentation:
+[Organize-IT.github.io/odoo-cli](https://github.com/Organize-IT/odoo-cli/tree/main/docs).
 
 Prefer named connections? They live in a `0600` TOML file:
 
@@ -75,6 +82,7 @@ Values of fields named like `password`, `api_key`, `secret` are `[redacted]` unl
 | `--company ID`, `--lang CODE`, `--context JSON` | Odoo context merged into every call |
 | `--insecure` | skip TLS verification (self-signed on-prem) |
 | `--no-redact`, `--include-sensitive` | lift the two output/model guards |
+| `--no-validate` | skip the field-name check against the model schema |
 | `--debug` | one JSON line per RPC on stderr (method, id, duration, retries) |
 | `--verbose` | include Odoo's server traceback in error output |
 
@@ -95,13 +103,51 @@ Values of fields named like `password`, `api_key`, `secret` are `[redacted]` unl
 
 Values: `true/false/null`, integers, floats, JSON lists or objects, quoted strings, else text.
 
+A bare word is looked up as a preset for the model: `-w overdue`, `-w unpaid`, `-w draft`,
+`-w confirmed`, `-w archived`. `odoo alias MODEL --presets` lists the ones that apply. A bare
+word that is not a preset exits 2 listing the ones that are.
+
+## Names and typos
+
+Read commands accept an alias in place of a technical model name (`invoices`, `customers`,
+`quotes`, `pickings`, ...); `odoo alias` prints the table and needs no connection. Write
+commands refuse an alias that carries a filter, so a vendor bill cannot be filed as a
+customer invoice by accident.
+
+Field names are checked against the model schema before the call, which costs nothing after
+the first lookup:
+
+```console
+$ odoo search partners -w mobil=+32
+{"error": {"code": "unknown_field", "message": "res.partner has no field 'mobil'. Did you mean 'mobile'? (also: phone)"}}
+$ echo $?
+2
+```
+
+`fields_get` is read once per model and cached under `~/.cache/odoo-cli` for 24 hours
+(`odoo cache path|list|clear`, `ODOO_CACHE_DIR`, `ODOO_SCHEMA_TTL`). Dotted paths are
+followed across relations. A computed non-stored field used in `-w` or `--order` warns on
+stderr rather than failing. Validation only rejects a name it has positively read from the
+server: when the schema is unreadable it stays quiet, so it can never refuse wrongly.
+`--no-validate` or `ODOO_NO_VALIDATE=1` turns it off.
+
+## Aggregates
+
+```bash
+odoo group invoices -w overdue --by partner_id --sum amount_residual \
+     --order "amount_residual desc" --limit 10
+odoo group invoices --by invoice_date:month --sum amount_total
+```
+
+`read_group` under the hood: counts and totals per group without pulling the records.
+
 ## Writes
 
 Off by default. Enable per connection with `allow_writes = true` on the profile
 (`odoo profile add ... --allow-writes`) or `ODOO_ALLOW_WRITES=1`.
 
 ```bash
-odoo create crm.lead -v name="Website inquiry" -v partner_id=42 --dry-run   # shows payload, exit 0
+odoo create crm.lead -v name="Website inquiry" -v partner_id=42 --dry-run   # payload only, exit 0
 odoo create crm.lead -v name="Website inquiry" -v partner_id=42             # prints the new id
 odoo write res.partner 42,43 -v active=false
 odoo unlink res.partner 99 --yes                                            # --yes required
@@ -163,8 +209,11 @@ repair loop in `odoocli.lenient`.
 
 ```bash
 uv sync --group dev
+uvx pre-commit install               # ruff, mypy and hygiene hooks on commit
 uv run pytest                        # unit tests, mocked JSON-RPC
 uv run ruff check && uv run mypy
+uv run pytest --cov --cov-report=term-missing   # gated at 93% in CI
+uv run --group docs mkdocs serve     # the documentation site
 
 ODOO_VERSION=17.0 scripts/start-odoo.sh                     # throwaway Odoo in Docker
 ODOO_URL=http://localhost:8069 ODOO_DB=test ODOO_LOGIN=admin ODOO_API_KEY=admin \
@@ -172,9 +221,13 @@ ODOO_ALLOW_WRITES=1 uv run pytest -m integration -o addopts=""
 docker compose -f docker/odoo-compose.yml down -v
 ```
 
-CI runs the unit suite on every PR and the integration matrix (Odoo 17.0, 18.0, 19.0) on
-`main`, tags and manual dispatch. Releases are published to PyPI on `v*` tags through
-trusted publishing.
+CI runs the unit suite on Python 3.11-3.13 and builds the docs on every PR; the integration
+matrix (Odoo 17.0, 18.0, 19.0) runs on `main`, tags and manual dispatch. Releases are
+published to PyPI on `v*` tags through trusted publishing, with every action pinned to a
+commit digest.
+
+`AGENTS.md` is the specification: layering, the contracts that may not change silently, and
+the definition of done. Read it before changing anything.
 
 ## License
 
