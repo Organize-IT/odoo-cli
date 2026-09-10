@@ -50,7 +50,7 @@ def test_create_dry_run_prints_payload(fake_odoo: FakeOdoo) -> None:
         "args": [{"ref": "A", "name": "X", "is_company": True}],
         "kwargs": {},
     }
-    assert fake_odoo.calls == []
+    assert [c for c in fake_odoo.calls if c[1] != "fields_get"] == []
 
 
 def test_create_executes_and_logs(fake_odoo: FakeOdoo) -> None:

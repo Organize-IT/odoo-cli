@@ -99,6 +99,12 @@ class FakeOdoo:
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result})
 
 
+@pytest.fixture(autouse=True)
+def isolated_cache(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never touch the real ~/.cache/odoo-cli during tests."""
+    monkeypatch.setenv("ODOO_CACHE_DIR", str(tmp_path / "cache"))
+
+
 @pytest.fixture
 def fake_odoo() -> Iterator[FakeOdoo]:
     with respx.mock(assert_all_called=False) as router:

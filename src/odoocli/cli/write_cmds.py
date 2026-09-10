@@ -8,6 +8,7 @@ import typer
 
 from odoocli.cli.app import (
     app,
+    check_fields,
     check_model,
     emit,
     require_writes,
@@ -26,7 +27,9 @@ ValuesOpt = typer.Option(
     [], "--value", "-v", help="field=value. Repeatable. Overrides keys from --values."
 )
 JsonValuesOpt = typer.Option(None, "--values", help="Values as a JSON object.")
-DryRunOpt = typer.Option(False, "--dry-run", help="Print the payload, call nothing, exit 0.")
+DryRunOpt = typer.Option(
+    False, "--dry-run", help="Print the payload, write nothing, exit 0. Values are still checked."
+)
 YesOpt = typer.Option(False, "--yes", "-y", help="Confirm a destructive or arbitrary call.")
 
 # Sentinel returned by a dry run so the command prints nothing more.
@@ -73,9 +76,11 @@ def create(
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
         check_model(sess, profile, model)
         vals = _merge_values(values, json_values)
+        if not dry_run:
+            require_writes(profile)
+        await check_fields(sess, client, profile, model, values=sorted(vals))
         if dry_run:
             return _dry_run(ctx, model, "create", [vals], {})
-        require_writes(profile)
         new_id = await client.create(model, vals)
         ids = [new_id] if isinstance(new_id, int) else list(new_id)
         _log_write(model, "create", ids, sorted(vals))
@@ -100,9 +105,11 @@ def write(
         check_model(sess, profile, model)
         id_list = parse_ids(ids)
         vals = _merge_values(values, json_values)
+        if not dry_run:
+            require_writes(profile)
+        await check_fields(sess, client, profile, model, values=sorted(vals))
         if dry_run:
             return _dry_run(ctx, model, "write", [id_list, vals], {})
-        require_writes(profile)
         ok = await client.write(model, id_list, vals)
         _log_write(model, "write", id_list, sorted(vals))
         return ok

@@ -21,6 +21,8 @@ from odoocli.cli.output import FORMATS, detect_format, render
 from odoocli.client import AsyncOdooClient
 from odoocli.config import ENV_ASSUME_YES, Profile, config_path, env_flag, resolve_profile
 from odoocli.errors import OdooError, OdooRefusedError
+from odoocli.schema import ENV_NO_VALIDATE, SchemaStore
+from odoocli.schema import check as schema_check
 from odoocli.security import is_sensitive_model, redact
 
 T = TypeVar("T")
@@ -43,6 +45,7 @@ _GLOBAL_FLAGS = {
     "--include-sensitive",
     "--include-archived",
     "--insecure",
+    "--no-validate",
     "--verbose",
     "--debug",
     "--version",
@@ -107,11 +110,21 @@ class Session:
     context: dict[str, Any] = field(default_factory=dict)
     verify_ssl: bool = True
     debug: bool = False
+    validate: bool = True
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     config: Path = field(default_factory=lambda: config_path(os.environ))
+    _store: SchemaStore | None = field(default=None, repr=False, compare=False)
 
     def profile(self) -> Profile:
         return resolve_profile(self.profile_name, self.env, self.config)
+
+    def store(self, profile: Profile) -> SchemaStore:
+        """Schema cache for this connection, created once per command."""
+        if self._store is None:
+            self._store = SchemaStore(
+                profile.url, profile.database, env=self.env, enabled=self.validate
+            )
+        return self._store
 
 
 def _version_callback(value: bool) -> None:
@@ -162,6 +175,11 @@ def _root(
     insecure: bool = typer.Option(
         False, "--insecure", help="Skip TLS certificate verification (self-signed on-prem)."
     ),
+    no_validate: bool = typer.Option(
+        False,
+        "--no-validate",
+        help="Do not check field names against the model schema before calling.",
+    ),
     debug: bool = typer.Option(
         False,
         "--debug",
@@ -184,6 +202,7 @@ def _root(
         context=build_context(context, include_archived, company, lang),
         verify_ssl=not insecure,
         debug=debug,
+        validate=not (no_validate or env_flag(os.environ, ENV_NO_VALIDATE)),
     )
 
 
@@ -272,6 +291,43 @@ def check_model(sess: Session, profile: Profile, model: str) -> None:
         )
 
 
+async def check_fields(
+    sess: Session,
+    client: AsyncOdooClient,
+    profile: Profile,
+    model: str,
+    *,
+    fields: list[str] | None = None,
+    domain: list[Any] | None = None,
+    order: str | None = None,
+    values: list[str] | None = None,
+) -> None:
+    """Reject unknown field names before the real call; warn on unstored ones.
+
+    Silently does nothing when the schema is unavailable or ``--no-validate``
+    was passed: a wrong refusal costs more than a missing check.
+    """
+    if not sess.validate:
+        return
+    store = sess.store(profile)
+    report = await schema_check(
+        store, client, model, fields=fields, domain=domain, order=order, values=values
+    )
+    store.flush()
+    report.raise_if_unknown()
+    for path, context in report.not_stored:
+        warn(
+            {
+                "warning": "field_not_stored",
+                "field": path,
+                "used_in": context,
+                "message": (
+                    f"{model}.{path} is computed and not stored: Odoo cannot filter or sort on it."
+                ),
+            }
+        )
+
+
 def require_writes(profile: Profile) -> None:
     if not profile.allow_writes:
         raise OdooRefusedError(
@@ -334,4 +390,10 @@ def main() -> None:
 
 
 # Command modules register themselves on ``app``; imported last to avoid cycles.
-from odoocli.cli import guide_cmd, profile_cmds, read_cmds, write_cmds  # noqa: E402,F401
+from odoocli.cli import (  # noqa: E402,F401
+    cache_cmds,
+    guide_cmd,
+    profile_cmds,
+    read_cmds,
+    write_cmds,
+)

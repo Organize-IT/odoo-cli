@@ -6,7 +6,7 @@ from typing import Any
 
 import typer
 
-from odoocli.cli.app import app, check_model, emit, run, session, warn
+from odoocli.cli.app import app, check_fields, check_model, emit, run, session, warn
 from odoocli.cli.values import parse_ids, split_fields
 from odoocli.client import AsyncOdooClient
 from odoocli.config import Profile
@@ -159,6 +159,7 @@ def search(
         check_model(sess, profile, model)
         dom = build_domain(domain, where)
         flds = split_fields(fields_)
+        await check_fields(sess, client, profile, model, fields=flds, domain=dom, order=order)
         if ids_only:
             return await client.search(
                 model,
@@ -193,7 +194,9 @@ def count(
 
     async def go(client: AsyncOdooClient, profile: Profile) -> int:
         check_model(sess, profile, model)
-        return await client.search_count(model, build_domain(domain, where))
+        dom = build_domain(domain, where)
+        await check_fields(sess, client, profile, model, domain=dom)
+        return await client.search_count(model, dom)
 
     emit(ctx, run(ctx, go))
 
@@ -211,7 +214,9 @@ def read(
     async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
         check_model(sess, profile, model)
         id_list = parse_ids(ids)
-        rows = await client.read(model, id_list, split_fields(fields_))
+        flds = split_fields(fields_)
+        await check_fields(sess, client, profile, model, fields=flds)
+        rows = await client.read(model, id_list, flds)
         missing = [i for i in id_list if i not in {r.get("id") for r in rows}]
         if missing:
             raise OdooMissingError(
