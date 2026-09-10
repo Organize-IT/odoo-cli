@@ -5,8 +5,10 @@ from __future__ import annotations
 import ast
 import json
 import re
+from datetime import date
 from typing import Any
 
+from odoocli import aliases
 from odoocli.errors import OdooUsageError
 
 _BINARY_OPS = ("&", "|")
@@ -213,7 +215,45 @@ def parse_where(expr: str) -> list[Any]:
     return [field, op, value]
 
 
-def build_domain(domain: str | None, where: list[str]) -> list[Any]:
-    """AND a JSON domain (optional) with every ``-w`` condition."""
-    base = sanitize_domain(normalize_domain(domain)) if domain else []
-    return base + [parse_where(w) for w in where]
+_BARE_WORD_RE = re.compile(r"^[A-Za-z][\w-]*$")
+
+
+def _parse_condition(model: str | None, token: str, today: date | None) -> list[list[Any]]:
+    """One ``-w`` token: a preset name if it is one, otherwise a domain leaf."""
+    if model is not None:
+        expanded = aliases.expand(model, token, today)
+        if expanded is not None:
+            return expanded
+    try:
+        return [parse_where(token)]
+    except OdooUsageError:
+        if not _BARE_WORD_RE.match(token.strip()):
+            raise
+        known = sorted(aliases.presets_for(model))
+        raise OdooUsageError(
+            f"{token!r} is neither a condition nor a preset"
+            + (f" for {model}" if model else "")
+            + ". Conditions look like 'field=value'; presets here are: "
+            + ", ".join(known)
+        ) from None
+
+
+def build_domain(
+    domain: str | None,
+    where: list[str],
+    *,
+    model: str | None = None,
+    base: list[list[Any]] | None = None,
+    today: date | None = None,
+) -> list[Any]:
+    """AND the alias clauses, an optional JSON domain and every ``-w`` condition.
+
+    ``model`` enables preset names in ``-w``; without it every token must be a
+    plain ``field op value`` condition.
+    """
+    out: list[Any] = list(base or [])
+    if domain:
+        out += sanitize_domain(normalize_domain(domain))
+    for token in where:
+        out += _parse_condition(model, token, today)
+    return out

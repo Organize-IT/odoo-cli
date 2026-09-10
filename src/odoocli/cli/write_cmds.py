@@ -16,6 +16,7 @@ from odoocli.cli.app import (
     run,
     session,
     warn,
+    write_target,
 )
 from odoocli.cli.values import parse_ids, parse_json_arg, parse_kv
 from odoocli.client import AsyncOdooClient
@@ -74,16 +75,17 @@ def create(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        check_model(sess, profile, model)
+        target = write_target(model)
+        check_model(sess, profile, target)
         vals = _merge_values(values, json_values)
         if not dry_run:
             require_writes(profile)
-        await check_fields(sess, client, profile, model, values=sorted(vals))
+        await check_fields(sess, client, profile, target, values=sorted(vals))
         if dry_run:
-            return _dry_run(ctx, model, "create", [vals], {})
-        new_id = await client.create(model, vals)
+            return _dry_run(ctx, target, "create", [vals], {})
+        new_id = await client.create(target, vals)
         ids = [new_id] if isinstance(new_id, int) else list(new_id)
-        _log_write(model, "create", ids, sorted(vals))
+        _log_write(target, "create", ids, sorted(vals))
         return new_id
 
     _emit_unless_dry(ctx, run(ctx, go))
@@ -102,16 +104,17 @@ def write(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        check_model(sess, profile, model)
+        target = write_target(model)
+        check_model(sess, profile, target)
         id_list = parse_ids(ids)
         vals = _merge_values(values, json_values)
         if not dry_run:
             require_writes(profile)
-        await check_fields(sess, client, profile, model, values=sorted(vals))
+        await check_fields(sess, client, profile, target, values=sorted(vals))
         if dry_run:
-            return _dry_run(ctx, model, "write", [id_list, vals], {})
-        ok = await client.write(model, id_list, vals)
-        _log_write(model, "write", id_list, sorted(vals))
+            return _dry_run(ctx, target, "write", [id_list, vals], {})
+        ok = await client.write(target, id_list, vals)
+        _log_write(target, "write", id_list, sorted(vals))
         return ok
 
     _emit_unless_dry(ctx, run(ctx, go))
@@ -129,14 +132,15 @@ def unlink(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        check_model(sess, profile, model)
+        target = write_target(model)
+        check_model(sess, profile, target)
         id_list = parse_ids(ids)
         if dry_run:
-            return _dry_run(ctx, model, "unlink", [id_list], {})
+            return _dry_run(ctx, target, "unlink", [id_list], {})
         require_writes(profile)
-        require_yes(sess, yes, f"Deleting {len(id_list)} {model} record(s)")
-        ok = await client.unlink(model, id_list)
-        _log_write(model, "unlink", id_list, [])
+        require_yes(sess, yes, f"Deleting {len(id_list)} {target} record(s)")
+        ok = await client.unlink(target, id_list)
+        _log_write(target, "unlink", id_list, [])
         return ok
 
     _emit_unless_dry(ctx, run(ctx, go))
@@ -161,7 +165,8 @@ def call(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        check_model(sess, profile, model)
+        target = write_target(model)
+        check_model(sess, profile, target)
         pos = parse_json_arg(args, "args") or []
         if not isinstance(pos, list):
             raise OdooUsageError("--args must be a JSON list")
@@ -172,14 +177,14 @@ def call(
         if id_list:
             pos = [id_list, *pos]
         if dry_run:
-            return _dry_run(ctx, model, method, pos, kw)
+            return _dry_run(ctx, target, method, pos, kw)
         mutating = not is_read_safe_method(method)
         if mutating:
             require_writes(profile)
-            require_yes(sess, yes, f"Calling {model}.{method}")
-        result = await client.execute(model, method, *pos, **kw)
+            require_yes(sess, yes, f"Calling {target}.{method}")
+        result = await client.execute(target, method, *pos, **kw)
         if mutating:
-            _log_write(model, method, id_list, [])
+            _log_write(target, method, id_list, [])
         return result
 
     _emit_unless_dry(ctx, run(ctx, go))

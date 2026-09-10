@@ -16,11 +16,12 @@ from typing import Any, TypeVar
 import typer
 from typer.core import TyperGroup
 
+from odoocli import aliases
 from odoocli._version import __version__
 from odoocli.cli.output import FORMATS, detect_format, render
 from odoocli.client import AsyncOdooClient
 from odoocli.config import ENV_ASSUME_YES, Profile, config_path, env_flag, resolve_profile
-from odoocli.errors import OdooError, OdooRefusedError
+from odoocli.errors import OdooError, OdooRefusedError, OdooUsageError
 from odoocli.schema import ENV_NO_VALIDATE, SchemaStore
 from odoocli.schema import check as schema_check
 from odoocli.security import is_sensitive_model, redact
@@ -282,6 +283,49 @@ def fail(err: OdooError, verbose: bool) -> None:
     raise typer.Exit(err.exit_code)
 
 
+def _unknown_name(name: str) -> OdooUsageError | None:
+    """A name with no dot that is close to an alias is almost certainly a typo."""
+    close = aliases.suggest_alias(name)
+    if "." in name or not close:
+        return None
+    return OdooUsageError(
+        f"{name!r} is neither an Odoo model nor an alias. Did you mean {close[0]!r}? "
+        "Run 'odoo alias' for the list.",
+        code="unknown_model",
+        data={"suggestions": close},
+    )
+
+
+def read_target(name: str) -> tuple[str, list[list[Any]]]:
+    """Resolve a model name or alias for a read command, with its base clauses."""
+    alias = aliases.resolve(name)
+    if alias is not None:
+        return alias.model, alias.clauses()
+    problem = _unknown_name(name)
+    if problem is not None:
+        raise problem
+    return name, []
+
+
+def write_target(name: str) -> str:
+    """Resolve a model name for a write command. Filtered aliases are refused."""
+    alias = aliases.resolve(name)
+    if alias is None:
+        problem = _unknown_name(name)
+        if problem is not None:
+            raise problem
+        return name
+    if alias.domain:
+        clauses = ", ".join(f"{f} {o} {v}" for f, o, v in alias.domain)
+        raise OdooUsageError(
+            f"Alias {name!r} means {alias.model} filtered on {clauses}. Writing through it "
+            f"would hide that filter, so use the technical name {alias.model!r} and set the "
+            "field yourself.",
+            code="alias_not_writable",
+        )
+    return alias.model
+
+
 def check_model(sess: Session, profile: Profile, model: str) -> None:
     if is_sensitive_model(model) and not (sess.include_sensitive or profile.allow_sensitive):
         raise OdooRefusedError(
@@ -391,6 +435,7 @@ def main() -> None:
 
 # Command modules register themselves on ``app``; imported last to avoid cycles.
 from odoocli.cli import (  # noqa: E402,F401
+    alias_cmd,
     cache_cmds,
     guide_cmd,
     profile_cmds,
