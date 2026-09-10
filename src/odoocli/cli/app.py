@@ -16,11 +16,14 @@ from typing import Any, TypeVar
 import typer
 from typer.core import TyperGroup
 
+from odoocli import aliases
 from odoocli._version import __version__
 from odoocli.cli.output import FORMATS, detect_format, render
 from odoocli.client import AsyncOdooClient
 from odoocli.config import ENV_ASSUME_YES, Profile, config_path, env_flag, resolve_profile
-from odoocli.errors import OdooError, OdooRefusedError
+from odoocli.errors import OdooError, OdooRefusedError, OdooUsageError
+from odoocli.schema import ENV_NO_VALIDATE, SchemaStore
+from odoocli.schema import check as schema_check
 from odoocli.security import is_sensitive_model, redact
 
 T = TypeVar("T")
@@ -43,14 +46,21 @@ _GLOBAL_FLAGS = {
     "--include-sensitive",
     "--include-archived",
     "--insecure",
+    "--no-validate",
     "--verbose",
     "--debug",
     "--version",
 }
 
 
-def hoist_global_options(args: list[str]) -> list[str]:
-    """Move root options found after the subcommand to the front, keeping order."""
+def hoist_global_options(args: list[str], value_options: frozenset[str] = frozenset()) -> list[str]:
+    """Move root options found after the subcommand to the front, keeping order.
+
+    ``value_options`` lists the options of the subcommand being invoked that
+    consume the next token. Their values are copied through untouched, so
+    ``--order --lang`` keeps ``--lang`` as the value of ``--order`` instead of
+    stealing it for the root parser.
+    """
     hoisted: list[str] = []
     rest: list[str] = []
     i = 0
@@ -60,6 +70,11 @@ def hoist_global_options(args: list[str]) -> list[str]:
             rest.extend(args[i:])
             break
         name, eq, _value = tok.partition("=")
+        is_global = tok in _GLOBAL_FLAGS or tok in _GLOBAL_WITH_VALUE
+        if tok in value_options and not is_global and not eq:
+            rest.extend(args[i : i + 2])
+            i += 2
+            continue
         if tok in _GLOBAL_FLAGS:
             hoisted.append(tok)
         elif tok in _GLOBAL_WITH_VALUE and i + 1 < len(args):
@@ -75,7 +90,35 @@ def hoist_global_options(args: list[str]) -> list[str]:
 
 class _RootGroup(TyperGroup):
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
-        return super().parse_args(ctx, hoist_global_options(args))
+        return super().parse_args(ctx, hoist_global_options(args, self._value_options(ctx, args)))
+
+    def _value_options(self, ctx: Any, args: list[str]) -> frozenset[str]:
+        """Option names of the invoked subcommand that take a value.
+
+        Walks the command tree with the words of the command line; anything it
+        cannot resolve yields an empty set, which is exactly the old behaviour.
+        """
+        names: set[str] = set()
+        group: Any = self
+        for tok in args:
+            if tok.startswith("-"):
+                continue
+            try:
+                command = group.get_command(ctx, tok)
+            except Exception:  # noqa: BLE001 - resolution is best effort
+                return frozenset()
+            if command is None:
+                return frozenset(names)
+            for param in command.params:
+                if getattr(param, "is_flag", False) or getattr(param, "nargs", 1) == 0:
+                    continue
+                names.update(param.opts or [])
+                names.update(param.secondary_opts or [])
+            if hasattr(command, "get_command"):  # a group: descend one level
+                group = command
+                continue
+            break
+        return frozenset(names)
 
 
 app = typer.Typer(
@@ -107,11 +150,21 @@ class Session:
     context: dict[str, Any] = field(default_factory=dict)
     verify_ssl: bool = True
     debug: bool = False
+    validate: bool = True
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     config: Path = field(default_factory=lambda: config_path(os.environ))
+    _store: SchemaStore | None = field(default=None, repr=False, compare=False)
 
     def profile(self) -> Profile:
         return resolve_profile(self.profile_name, self.env, self.config)
+
+    def store(self, profile: Profile) -> SchemaStore:
+        """Schema cache for this connection, created once per command."""
+        if self._store is None:
+            self._store = SchemaStore(
+                profile.url, profile.database, env=self.env, enabled=self.validate
+            )
+        return self._store
 
 
 def _version_callback(value: bool) -> None:
@@ -162,6 +215,11 @@ def _root(
     insecure: bool = typer.Option(
         False, "--insecure", help="Skip TLS certificate verification (self-signed on-prem)."
     ),
+    no_validate: bool = typer.Option(
+        False,
+        "--no-validate",
+        help="Do not check field names against the model schema before calling.",
+    ),
     debug: bool = typer.Option(
         False,
         "--debug",
@@ -184,6 +242,7 @@ def _root(
         context=build_context(context, include_archived, company, lang),
         verify_ssl=not insecure,
         debug=debug,
+        validate=not (no_validate or env_flag(os.environ, ENV_NO_VALIDATE)),
     )
 
 
@@ -263,12 +322,92 @@ def fail(err: OdooError, verbose: bool) -> None:
     raise typer.Exit(err.exit_code)
 
 
+def _unknown_name(name: str) -> OdooUsageError | None:
+    """A name with no dot that is close to an alias is almost certainly a typo."""
+    close = aliases.suggest_alias(name)
+    if "." in name or not close:
+        return None
+    return OdooUsageError(
+        f"{name!r} is neither an Odoo model nor an alias. Did you mean {close[0]!r}? "
+        "Run 'odoo alias' for the list.",
+        code="unknown_model",
+        data={"suggestions": close},
+    )
+
+
+def read_target(name: str) -> tuple[str, list[list[Any]]]:
+    """Resolve a model name or alias for a read command, with its base clauses."""
+    alias = aliases.resolve(name)
+    if alias is not None:
+        return alias.model, alias.clauses()
+    problem = _unknown_name(name)
+    if problem is not None:
+        raise problem
+    return name, []
+
+
+def write_target(name: str) -> str:
+    """Resolve a model name for a write command. Filtered aliases are refused."""
+    alias = aliases.resolve(name)
+    if alias is None:
+        problem = _unknown_name(name)
+        if problem is not None:
+            raise problem
+        return name
+    if alias.domain:
+        clauses = ", ".join(f"{f} {o} {v}" for f, o, v in alias.domain)
+        raise OdooUsageError(
+            f"Alias {name!r} means {alias.model} filtered on {clauses}. Writing through it "
+            f"would hide that filter, so use the technical name {alias.model!r} and set the "
+            "field yourself.",
+            code="alias_not_writable",
+        )
+    return alias.model
+
+
 def check_model(sess: Session, profile: Profile, model: str) -> None:
     if is_sensitive_model(model) and not (sess.include_sensitive or profile.allow_sensitive):
         raise OdooRefusedError(
             f"Model {model!r} is sensitive (secrets or code execution). "
             "Pass --include-sensitive or set allow_sensitive = true on the profile.",
             code="sensitive_model",
+        )
+
+
+async def check_fields(
+    sess: Session,
+    client: AsyncOdooClient,
+    profile: Profile,
+    model: str,
+    *,
+    fields: list[str] | None = None,
+    domain: list[Any] | None = None,
+    order: str | None = None,
+    values: list[str] | None = None,
+) -> None:
+    """Reject unknown field names before the real call; warn on unstored ones.
+
+    Silently does nothing when the schema is unavailable or ``--no-validate``
+    was passed: a wrong refusal costs more than a missing check.
+    """
+    if not sess.validate:
+        return
+    store = sess.store(profile)
+    report = await schema_check(
+        store, client, model, fields=fields, domain=domain, order=order, values=values
+    )
+    store.flush()
+    report.raise_if_unknown()
+    for path, context in report.not_stored:
+        warn(
+            {
+                "warning": "field_not_stored",
+                "field": path,
+                "used_in": context,
+                "message": (
+                    f"{model}.{path} is computed and not stored: Odoo cannot filter or sort on it."
+                ),
+            }
         )
 
 
@@ -334,4 +473,11 @@ def main() -> None:
 
 
 # Command modules register themselves on ``app``; imported last to avoid cycles.
-from odoocli.cli import guide_cmd, profile_cmds, read_cmds, write_cmds  # noqa: E402,F401
+from odoocli.cli import (  # noqa: E402,F401
+    alias_cmd,
+    cache_cmds,
+    guide_cmd,
+    profile_cmds,
+    read_cmds,
+    write_cmds,
+)

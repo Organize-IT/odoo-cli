@@ -6,12 +6,21 @@ from typing import Any
 
 import typer
 
-from odoocli.cli.app import app, check_model, emit, run, session, warn
+from odoocli.cli.app import (
+    app,
+    check_fields,
+    check_model,
+    emit,
+    read_target,
+    run,
+    session,
+    warn,
+)
 from odoocli.cli.values import parse_ids, split_fields
 from odoocli.client import AsyncOdooClient
 from odoocli.config import Profile
 from odoocli.domain import build_domain
-from odoocli.errors import OdooMissingError
+from odoocli.errors import OdooMissingError, OdooUsageError
 from odoocli.lenient import lenient_search_read
 
 DEFAULT_LIMIT = 80
@@ -77,7 +86,7 @@ def models(
 @app.command()
 def fields(
     ctx: typer.Context,
-    model: str = typer.Argument(..., help="Technical model name, e.g. res.partner"),
+    model: str = typer.Argument(..., help="Model or alias, e.g. res.partner or invoices"),
     type_: str | None = typer.Option(None, "--type", help="Keep only this field type."),
     stored: bool = typer.Option(
         False, "--stored", help="Keep only stored fields (searchable and orderable)."
@@ -91,8 +100,9 @@ def fields(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> dict[str, dict[str, Any]]:
-        check_model(sess, profile, model)
-        return await client.fields_get(model, None if all_attributes else FIELD_ATTRIBUTES)
+        target, _base = read_target(model)
+        check_model(sess, profile, target)
+        return await client.fields_get(target, None if all_attributes else FIELD_ATTRIBUTES)
 
     data = run(ctx, go)
     needle = search.lower() if search else None
@@ -124,7 +134,7 @@ def fields(
 @app.command()
 def search(
     ctx: typer.Context,
-    model: str = typer.Argument(..., help="Technical model name"),
+    model: str = typer.Argument(..., help="Model or alias, e.g. account.move or invoices"),
     where: list[str] = WhereOpt,
     domain: str | None = DomainOpt,
     fields_: str | None = FieldsOpt,
@@ -147,32 +157,40 @@ def search(
     sess = session(ctx)
 
     async def fetch(
-        client: AsyncOdooClient, dom: list[Any], flds: list[str] | None, lim: int | None, off: int
+        client: AsyncOdooClient,
+        target: str,
+        dom: list[Any],
+        flds: list[str] | None,
+        lim: int | None,
+        off: int,
     ) -> list[dict[str, Any]]:
         if lenient:
             return await lenient_search_read(
-                client, model, dom, flds, lim, off, order, on_warning=warn
+                client, target, dom, flds, lim, off, order, on_warning=warn
             )
-        return await client.search_read(model, dom, flds, lim, off, order)
+        return await client.search_read(target, dom, flds, lim, off, order)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[Any]:
-        check_model(sess, profile, model)
-        dom = build_domain(domain, where)
+        target, base = read_target(model)
+        check_model(sess, profile, target)
+        dom = build_domain(domain, where, model=target, base=base)
         flds = split_fields(fields_)
+        await check_fields(sess, client, profile, target, fields=flds, domain=dom, order=order)
         if ids_only:
             return await client.search(
-                model,
+                target,
                 dom,
                 None if all_ else (DEFAULT_LIMIT if limit is None else limit),
                 offset,
                 order,
             )
         if not all_:
-            return await fetch(client, dom, flds, DEFAULT_LIMIT if limit is None else limit, offset)
+            lim = DEFAULT_LIMIT if limit is None else limit
+            return await fetch(client, target, dom, flds, lim, offset)
         rows: list[dict[str, Any]] = []
         off = offset
         while True:
-            page = await fetch(client, dom, flds, PAGE_SIZE, off)
+            page = await fetch(client, target, dom, flds, PAGE_SIZE, off)
             rows.extend(page)
             if len(page) < PAGE_SIZE:
                 return rows
@@ -192,8 +210,69 @@ def count(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> int:
-        check_model(sess, profile, model)
-        return await client.search_count(model, build_domain(domain, where))
+        target, base = read_target(model)
+        check_model(sess, profile, target)
+        dom = build_domain(domain, where, model=target, base=base)
+        await check_fields(sess, client, profile, target, domain=dom)
+        return await client.search_count(target, dom)
+
+    emit(ctx, run(ctx, go))
+
+
+@app.command("group")
+def group(
+    ctx: typer.Context,
+    model: str = typer.Argument(..., help="Model or alias, e.g. account.move or invoices"),
+    by: str = typer.Option(
+        ...,
+        "--by",
+        help="Group by these fields, comma separated. A date granularity is allowed: "
+        "invoice_date:month.",
+    ),
+    sum_: str | None = typer.Option(
+        None, "--sum", help="Numeric fields to total, comma separated."
+    ),
+    avg: str | None = typer.Option(
+        None, "--avg", help="Numeric fields to average, comma separated."
+    ),
+    where: list[str] = WhereOpt,
+    domain: str | None = DomainOpt,
+    limit: int | None = typer.Option(None, "--limit", "-l", help="Max groups."),
+    offset: int = typer.Option(0, "--offset"),
+    order: str | None = typer.Option(None, "--order", help='e.g. "amount_total desc"'),
+) -> None:
+    """read_group on a model: counts and totals per group, without pulling the records."""
+    sess = session(ctx)
+
+    async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
+        target, base = read_target(model)
+        check_model(sess, profile, target)
+        dom = build_domain(domain, where, model=target, base=base)
+        groupby = split_fields(by) or []
+        if not groupby:
+            raise OdooUsageError("--by needs at least one field")
+        aggregates = [f"{f}:sum" for f in split_fields(sum_) or []]
+        aggregates += [f"{f}:avg" for f in split_fields(avg) or []]
+        await check_fields(
+            sess,
+            client,
+            profile,
+            target,
+            fields=[spec.split(":", 1)[0] for spec in groupby + aggregates],
+            domain=dom,
+            order=order,
+        )
+        kwargs: dict[str, Any] = {"lazy": False}
+        if limit is not None:
+            kwargs["limit"] = limit
+        if offset:
+            kwargs["offset"] = offset
+        if order:
+            kwargs["orderby"] = order
+        result = await client.execute(
+            target, "read_group", dom, groupby + aggregates, groupby, **kwargs
+        )
+        return list(result) if isinstance(result, list) else []
 
     emit(ctx, run(ctx, go))
 
@@ -209,13 +288,16 @@ def read(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
-        check_model(sess, profile, model)
+        target, _base = read_target(model)
+        check_model(sess, profile, target)
         id_list = parse_ids(ids)
-        rows = await client.read(model, id_list, split_fields(fields_))
+        flds = split_fields(fields_)
+        await check_fields(sess, client, profile, target, fields=flds)
+        rows = await client.read(target, id_list, flds)
         missing = [i for i in id_list if i not in {r.get("id") for r in rows}]
         if missing:
             raise OdooMissingError(
-                f"{model} records not found or not visible: {missing}",
+                f"{target} records not found or not visible: {missing}",
                 data={"missing_ids": missing, "records": rows},
             )
         return rows

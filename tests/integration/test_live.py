@@ -99,3 +99,32 @@ def test_cli_write_cycle() -> None:
     assert cli("unlink", "res.partner", str(new_id), "--yes").returncode == 0
     assert cli("count", "res.partner", "-w", f"id={new_id}").stdout.strip() == "0"
     assert cli("read", "res.partner", str(new_id)).returncode == 1
+
+
+def test_live_schema_validation_rejects_a_typo() -> None:
+    """The schema really is readable on this server, and a typo never reaches it."""
+    out = cli("search", "res.partner", "-w", "nam=x")
+    assert out.returncode == 2, out.stdout
+    error = json.loads(out.stderr)["error"]
+    assert error["code"] == "unknown_field"
+    assert "name" in error["message"]
+
+
+def test_live_schema_validation_accepts_a_relation_path() -> None:
+    out = cli("search", "res.partner", "-w", "country_id.code=BE", "--fields", "name", "-l", "1")
+    assert out.returncode == 0, out.stderr
+
+
+def test_live_alias_and_preset() -> None:
+    """account.move really answers to the alias filter and the preset fields."""
+    out = cli("count", "invoices", "-w", "unpaid")
+    assert out.returncode == 0, out.stderr
+    assert int(out.stdout.strip()) >= 0
+
+
+def test_live_read_group() -> None:
+    """read_group exists and answers on every supported Odoo version."""
+    out = cli("group", "res.partner", "--by", "is_company", "--format", "json")
+    assert out.returncode == 0, out.stderr
+    groups = json.loads(out.stdout)
+    assert groups and all("__count" in g for g in groups)

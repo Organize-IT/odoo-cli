@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "odoo-agent-cli"
-version = "0.3.0"
+version = "0.4.0"
 description = "Odoo JSON-RPC CLI and Python client built for AI agents and scripts."
 readme = "README.md"
 license = "MIT"
@@ -44,6 +44,12 @@ dev = [
   "respx>=0.21",
   "ruff>=0.6",
   "mypy>=1.11",
+  "pytest-cov>=5",
+]
+docs = [
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.26",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -75,6 +81,15 @@ warn_unreachable = true
 [[tool.mypy.overrides]]
 module = ["respx", "respx.*"]
 ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["odoocli"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 93
+exclude_also = ["if TYPE_CHECKING:", "raise AssertionError\\(\"unreachable\"\\)"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -36,6 +36,52 @@ work on every command:
 --context '{"tz": "Europe/Brussels"}'   any other key, merged with the flags above
 ```
 
+## Business names instead of technical ones
+
+Read commands accept an alias in place of a model name, and a preset name in place of a
+condition. Both expand to an ordinary domain before anything is sent, so the result has
+exactly the same shape.
+
+```
+odoo alias                    every alias, its model and its filter (no connection needed)
+odoo alias invoices --presets the presets that apply to that model
+```
+
+```
+odoo search invoices -w overdue      same as
+odoo search account.move -w move_type=out_invoice -w payment_state=not_paid \
+                         -w invoice_date_due<TODAY
+```
+
+Aliases include `partners`, `customers`, `suppliers`, `invoices`, `bills`, `credit-notes`,
+`orders`, `quotes`, `opportunities`, `products`, `pickings`, `users`, `employees`, `tasks`.
+Presets include `overdue`, `unpaid`, `paid`, `draft`, `posted`, `cancelled`, `confirmed`,
+`this-month`, `this-year`, `ready`, `done`, and `archived` / `active` on any model.
+
+Write commands refuse an alias that carries a filter (exit 2, `alias_not_writable`): use the
+technical name and set the discriminator field yourself, so a vendor bill cannot be filed as
+a customer invoice by accident.
+
+## Field names are checked before the call
+
+A misspelled field costs no round trip. The CLI reads the model schema once with
+`fields_get`, caches it for 24 hours, and checks every name used in `-w`, `--fields`,
+`--order`, `-v` and `--by`:
+
+```
+$ odoo search partners -w mobil=+32
+{"error": {"code": "unknown_field", "message": "res.partner has no field 'mobil'.
+ Did you mean 'mobile'? (also: phone)"}}      exit 2, nothing was sent
+```
+
+Dotted paths are followed across relations, and the error names the model where the path
+actually broke. Using a computed non-stored field in `-w` or `--order` produces a
+`field_not_stored` warning on stderr and the call still goes out.
+
+Validation only ever rejects a name it has positively read from the server: if the schema
+cannot be read, it stays quiet. Turn it off with `--no-validate` or `ODOO_NO_VALIDATE=1`.
+Refresh it after a module install or an Odoo upgrade with `odoo cache clear`.
+
 ## Output contract
 
 - Piped or captured: raw Odoo JSON, exactly what `search_read`, `read` or `fields_get` return.
@@ -59,7 +105,15 @@ odoo search MODEL [-w COND]... [--domain JSON] [--fields a,b] [--limit N] [--off
                   [--order "x desc"] [--all] [--ids-only] [--lenient-fields]
 odoo count MODEL [-w COND]... [--domain JSON]
 odoo read MODEL ID [ID...] [--fields a,b]
+odoo group MODEL --by FIELD[,FIELD] [--sum a,b] [--avg a,b] [-w COND]... [--limit N]
+odoo alias [NAME] [--presets]               aliases and presets, offline
+odoo cache path|list|clear                  the schema cache
 ```
+
+`MODEL` accepts an alias on every read command. `odoo group` runs `read_group`, so you
+get counts and totals per group without pulling the records:
+`odoo group invoices -w overdue --by partner_id --sum amount_residual`.
+Grouping keys accept a date granularity: `--by invoice_date:month`.
 
 Conditions (`-w`, repeatable, AND-ed together, combined with `--domain`):
 
@@ -84,7 +138,8 @@ odoo unlink MODEL IDS --yes [--dry-run]
 odoo call MODEL METHOD [--ids 1,2] [--args JSON] [--kwargs JSON] [--yes] [--dry-run]
 ```
 
-- `--dry-run` prints the exact payload and exits 0 without calling Odoo. Use it first.
+- `--dry-run` prints the exact payload and exits 0 without writing anything. It does read
+  the model schema to check your field names, so a typo is caught there too. Use it first.
 - `unlink` and any `call` to a non read-only method need `--yes` (or `ODOO_ASSUME_YES=1`).
 - `call` on read-only methods (`name_search`, `read_group`, `default_get`, ...) needs
   neither `allow_writes` nor `--yes`.
@@ -103,8 +158,9 @@ One2many and many2many fields take Odoo commands, written as JSON in `-v` or `--
 
 ## Working method that avoids most failures
 
-1. Unknown model? `odoo fields MODEL` first. It shows `type`, `required`, `store`, `relation`
-   and `selection` values.
+1. Unknown model? Try `odoo alias` first, then `odoo models --like word`. Then
+   `odoo fields MODEL`, which shows `type`, `required`, `store`, `relation` and `selection`
+   values.
 2. Only filter or order on fields with `store: true`. Computed non-stored fields
    (`qty_available`, `amount_to_invoice`, ...) can be read but not searched; Odoo answers
    "Cannot convert ... to SQL". Read them and filter client-side.
@@ -119,7 +175,8 @@ One2many and many2many fields take Odoo commands, written as JSON in `-v` or `--
    became `company_ids`). If a field is rejected, `odoo fields` is the truth.
    `--lenient-fields` on `search` removes rejected fields and retries, with a warning on
    stderr; only use it for exploration, never in a script that relies on the result.
-8. Never guess a model name: `odoo models --like invoice`.
+8. Never guess a model name: `odoo alias`, then `odoo models --like invoice`. A dotless
+   name close to a known alias is reported as a typo instead of being sent.
 9. Sensitive models (`ir.config_parameter`, `ir.mail_server`, `res.users.apikeys`, `ir.cron`,
    `ir.actions.server`, ...) are refused unless `--include-sensitive`.
 10. A record you know exists but cannot find is usually archived (`--include-archived`) or in
@@ -131,6 +188,10 @@ One2many and many2many fields take Odoo commands, written as JSON in `-v` or `--
 ## Recipes
 
 ```
+odoo search customers -w country_id.code=BE --fields name,email,vat --limit 20
+odoo count invoices -w overdue
+odoo group invoices -w overdue --by partner_id --sum amount_residual --order "amount_residual desc" --limit 10
+odoo group invoices --by invoice_date:month --sum amount_total
 odoo search res.partner -w is_company=true -w country_id.code=BE --fields name,email,vat --limit 20
 odoo search sale.order -w state=sale -w date_order>=2026-01-01 --fields name,partner_id,amount_total --order "amount_total desc"
 odoo count account.move -w move_type=out_invoice -w payment_state=not_paid -w invoice_date_due<2026-09-01
