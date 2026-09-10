@@ -20,7 +20,7 @@ from odoocli.cli.values import parse_ids, split_fields
 from odoocli.client import AsyncOdooClient
 from odoocli.config import Profile
 from odoocli.domain import build_domain
-from odoocli.errors import OdooMissingError
+from odoocli.errors import OdooMissingError, OdooUsageError
 from odoocli.lenient import lenient_search_read
 
 DEFAULT_LIMIT = 80
@@ -215,6 +215,64 @@ def count(
         dom = build_domain(domain, where, model=target, base=base)
         await check_fields(sess, client, profile, target, domain=dom)
         return await client.search_count(target, dom)
+
+    emit(ctx, run(ctx, go))
+
+
+@app.command("group")
+def group(
+    ctx: typer.Context,
+    model: str = typer.Argument(..., help="Model or alias, e.g. account.move or invoices"),
+    by: str = typer.Option(
+        ...,
+        "--by",
+        help="Group by these fields, comma separated. A date granularity is allowed: "
+        "invoice_date:month.",
+    ),
+    sum_: str | None = typer.Option(
+        None, "--sum", help="Numeric fields to total, comma separated."
+    ),
+    avg: str | None = typer.Option(
+        None, "--avg", help="Numeric fields to average, comma separated."
+    ),
+    where: list[str] = WhereOpt,
+    domain: str | None = DomainOpt,
+    limit: int | None = typer.Option(None, "--limit", "-l", help="Max groups."),
+    offset: int = typer.Option(0, "--offset"),
+    order: str | None = typer.Option(None, "--order", help='e.g. "amount_total desc"'),
+) -> None:
+    """read_group on a model: counts and totals per group, without pulling the records."""
+    sess = session(ctx)
+
+    async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
+        target, base = read_target(model)
+        check_model(sess, profile, target)
+        dom = build_domain(domain, where, model=target, base=base)
+        groupby = split_fields(by) or []
+        if not groupby:
+            raise OdooUsageError("--by needs at least one field")
+        aggregates = [f"{f}:sum" for f in split_fields(sum_) or []]
+        aggregates += [f"{f}:avg" for f in split_fields(avg) or []]
+        await check_fields(
+            sess,
+            client,
+            profile,
+            target,
+            fields=[spec.split(":", 1)[0] for spec in groupby + aggregates],
+            domain=dom,
+            order=order,
+        )
+        kwargs: dict[str, Any] = {"lazy": False}
+        if limit is not None:
+            kwargs["limit"] = limit
+        if offset:
+            kwargs["offset"] = offset
+        if order:
+            kwargs["orderby"] = order
+        result = await client.execute(
+            target, "read_group", dom, groupby + aggregates, groupby, **kwargs
+        )
+        return list(result) if isinstance(result, list) else []
 
     emit(ctx, run(ctx, go))
 
