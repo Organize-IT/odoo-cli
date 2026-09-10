@@ -53,8 +53,14 @@ _GLOBAL_FLAGS = {
 }
 
 
-def hoist_global_options(args: list[str]) -> list[str]:
-    """Move root options found after the subcommand to the front, keeping order."""
+def hoist_global_options(args: list[str], value_options: frozenset[str] = frozenset()) -> list[str]:
+    """Move root options found after the subcommand to the front, keeping order.
+
+    ``value_options`` lists the options of the subcommand being invoked that
+    consume the next token. Their values are copied through untouched, so
+    ``--order --lang`` keeps ``--lang`` as the value of ``--order`` instead of
+    stealing it for the root parser.
+    """
     hoisted: list[str] = []
     rest: list[str] = []
     i = 0
@@ -64,6 +70,11 @@ def hoist_global_options(args: list[str]) -> list[str]:
             rest.extend(args[i:])
             break
         name, eq, _value = tok.partition("=")
+        is_global = tok in _GLOBAL_FLAGS or tok in _GLOBAL_WITH_VALUE
+        if tok in value_options and not is_global and not eq:
+            rest.extend(args[i : i + 2])
+            i += 2
+            continue
         if tok in _GLOBAL_FLAGS:
             hoisted.append(tok)
         elif tok in _GLOBAL_WITH_VALUE and i + 1 < len(args):
@@ -79,7 +90,35 @@ def hoist_global_options(args: list[str]) -> list[str]:
 
 class _RootGroup(TyperGroup):
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
-        return super().parse_args(ctx, hoist_global_options(args))
+        return super().parse_args(ctx, hoist_global_options(args, self._value_options(ctx, args)))
+
+    def _value_options(self, ctx: Any, args: list[str]) -> frozenset[str]:
+        """Option names of the invoked subcommand that take a value.
+
+        Walks the command tree with the words of the command line; anything it
+        cannot resolve yields an empty set, which is exactly the old behaviour.
+        """
+        names: set[str] = set()
+        group: Any = self
+        for tok in args:
+            if tok.startswith("-"):
+                continue
+            try:
+                command = group.get_command(ctx, tok)
+            except Exception:  # noqa: BLE001 - resolution is best effort
+                return frozenset()
+            if command is None:
+                return frozenset(names)
+            for param in command.params:
+                if getattr(param, "is_flag", False) or getattr(param, "nargs", 1) == 0:
+                    continue
+                names.update(param.opts or [])
+                names.update(param.secondary_opts or [])
+            if hasattr(command, "get_command"):  # a group: descend one level
+                group = command
+                continue
+            break
+        return frozenset(names)
 
 
 app = typer.Typer(
