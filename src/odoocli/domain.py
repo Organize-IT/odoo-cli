@@ -16,7 +16,8 @@ _UNARY_OP = "!"
 # Trailing "(#42)" of a humanised many2one ("Name (#42)"), as produced by
 # LLM-facing layers. Recovered back to the int id when fed into a domain.
 _HUMANIZED_M2O_RE = re.compile(r"\(#(\d+)\)\s*$")
-_DROP = object()
+_TRUE = object()
+"""A sub-expression that matches everything, once the field it filtered on is removed."""
 
 
 # ----- normalisation (ported from UpBoard's OdooConnector) -----
@@ -103,30 +104,59 @@ def _parse(tokens: list[Any], pos: int) -> tuple[Any, int]:
     return ("leaf", tok), pos + 1
 
 
+def _mentions(node: Any, bad_field: str) -> bool:
+    kind = node[0]
+    if kind == "leaf":
+        term = node[1]
+        return bool(_is_leaf(term) and term[0] == bad_field)
+    if kind == "not":
+        return _mentions(node[1], bad_field)
+    return _mentions(node[2], bad_field) or _mentions(node[3], bad_field)
+
+
 def _serialize(node: Any, bad_field: str) -> Any:
+    """Replace every leaf on ``bad_field`` with "matches everything", then simplify.
+
+    Repairing a query may only ever widen it. Two places make that non-obvious:
+
+    * Under ``!``, weakening the operand *strengthens* the result, so the whole negation
+      has to go rather than the leaf inside it.
+    * Under ``|``, an operand that matches everything absorbs the disjunction. Keeping
+      only the other operand would drop records the caller explicitly asked for.
+    """
     kind = node[0]
     if kind == "leaf":
         term = node[1]
         if _is_leaf(term) and term[0] == bad_field:
-            return _DROP
+            return _TRUE
         return [term]
     if kind == "not":
-        child = _serialize(node[1], bad_field)
-        return _DROP if child is _DROP else [_UNARY_OP, *child]
+        if _mentions(node[1], bad_field):
+            return _TRUE
+        return [_UNARY_OP, *_serialize(node[1], bad_field)]
     _, operator, left_node, right_node = node
     left = _serialize(left_node, bad_field)
     right = _serialize(right_node, bad_field)
-    if left is _DROP and right is _DROP:
-        return _DROP
-    if left is _DROP:
+    if operator == "|":
+        if left is _TRUE or right is _TRUE:
+            return _TRUE
+        return [operator, *left, *right]
+    if left is _TRUE and right is _TRUE:
+        return _TRUE
+    if left is _TRUE:
         return right
-    if right is _DROP:
+    if right is _TRUE:
         return left
     return [operator, *left, *right]
 
 
 def strip_field_from_domain(domain: Any, bad_field: str) -> Any:
-    """Remove every leaf on ``bad_field``; ``|``/``&`` fold onto the surviving operand."""
+    """Remove every constraint on ``bad_field``, widening the domain and never narrowing it.
+
+    Every record the original domain matched still matches the result. That is the only
+    property that makes an automatic repair defensible: returning extra rows is visible,
+    losing rows the caller asked for is not.
+    """
     if not isinstance(domain, list) or not domain:
         return domain
     try:
@@ -135,7 +165,7 @@ def strip_field_from_domain(domain: Any, bad_field: str) -> Any:
         while pos < len(domain):
             node, pos = _parse(domain, pos)
             serialized = _serialize(node, bad_field)
-            if serialized is not _DROP:
+            if serialized is not _TRUE:
                 cleaned.extend(serialized)
         return cleaned
     except (IndexError, TypeError):

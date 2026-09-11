@@ -38,13 +38,26 @@ def test_sanitize_dehumanizes_relational_operands_only() -> None:
     ]
 
 
-def test_strip_field_folds_operators() -> None:
+def test_strip_field_drops_the_whole_disjunction() -> None:
+    """A partner with a mobile and no phone matched the OR; it must still match afterwards.
+
+    Keeping only the surviving operand would have dropped it, so the disjunction goes as a
+    whole and the AND-ed condition next to it stays.
+    """
     dom = ["|", ["mobile", "!=", False], ["phone", "!=", False], ["is_company", "=", True]]
-    assert strip_field_from_domain(dom, "mobile") == [
-        ["phone", "!=", False],
-        ["is_company", "=", True],
-    ]
+    assert strip_field_from_domain(dom, "mobile") == [["is_company", "=", True]]
+
+
+def test_strip_field_drops_a_negation_that_mentions_the_field() -> None:
+    """Weakening anything under ``!`` strengthens the result, so the negation goes too."""
     assert strip_field_from_domain(["!", ["mobile", "=", False]], "mobile") == []
+    dom = ["!", "&", ["mobile", "=", False], ["is_company", "=", True]]
+    assert strip_field_from_domain(dom, "mobile") == []
+
+
+def test_strip_field_folds_a_conjunction_onto_the_survivor() -> None:
+    dom = ["&", ["mobile", "!=", False], ["is_company", "=", True]]
+    assert strip_field_from_domain(dom, "mobile") == [["is_company", "=", True]]
 
 
 @pytest.mark.parametrize(
