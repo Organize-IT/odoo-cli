@@ -167,6 +167,9 @@ A change is finished when all of these are true:
 6. `CHANGELOG.md` has an entry under the unreleased heading.
 7. Anything touching version-specific Odoo behaviour has a live assertion in
    `tests/integration/test_live.py`, which runs against 17, 18 and 19.
+8. A decision with a real trade-off gets an ADR in `docs/decisions/`, and the ADR
+   says what would change our mind. A decision recorded without its exit condition
+   is an assertion, not a decision.
 
 ## Testing
 

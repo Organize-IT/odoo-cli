@@ -258,7 +258,8 @@ published to PyPI on `v*` tags through trusted publishing, with every action pin
 commit digest.
 
 `AGENTS.md` is the specification: layering, the contracts that may not change silently, and
-the definition of done. Read it before changing anything.
+the definition of done. [docs/decisions/](docs/decisions/) records the decisions with a real
+trade-off behind them. Read both before changing anything.
 
 ## License
 
