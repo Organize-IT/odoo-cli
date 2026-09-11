@@ -69,6 +69,7 @@ Nothing found: exit code 3 with a message listing those three ways. A profile st
 | bad arguments | | `{"error": ...}` | 2 |
 | connection, auth, no profile | | `{"error": ...}` | 3 |
 | refused by a guard | | `{"error": ...}` | 4 |
+| query repaired to run | rows | `{"error": ...}` | 5 |
 | write executed | result | `{"write": {"model", "method", "ids", "fields"}}` | 0 |
 
 Data is never humanised: many2one fields stay `[id, "name"]`, empty values stay `false`.
@@ -165,8 +166,9 @@ are refused unless `--include-sensitive`.
   many2one shapes) and recipes.
 - The same text ships as an [Agent Skill](https://github.com/Organize-IT/odoo-cli/blob/main/SKILL.md):
   `npx skills add Organize-IT/odoo-cli`.
-- `odoo search ... --lenient-fields` removes fields Odoo rejects and retries, with a warning on
-  stderr. Exploration only.
+- `odoo search ... --lenient-fields` removes fields Odoo rejects and retries. It prints the
+  rows, then exits **5**: they answer a wider question than the one you asked. Exploration
+  stays comfortable; a script that checks its exit codes cannot be fooled by it.
 
 ## Library
 

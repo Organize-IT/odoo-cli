@@ -114,16 +114,38 @@ def test_search_odoo_error_exit_1(fake_odoo: FakeOdoo) -> None:
     assert json.loads(r.stderr)["error"]["debug"] == "Traceback"
 
 
-def test_search_lenient_warns_on_stderr(fake_odoo: FakeOdoo) -> None:
+def _lenient_server(fake_odoo: FakeOdoo) -> None:
     def handler(_a: list[Any], k: dict[str, Any]) -> Any:
         if "nope" in k.get("fields", []):
             raise RpcFailure("builtins.ValueError", "Invalid field 'nope'")
         return [{"id": 1}]
 
     fake_odoo.on("res.partner", "search_read", handler)
+
+
+def test_search_lenient_prints_the_rows_then_exits_5(fake_odoo: FakeOdoo) -> None:
+    """The rows are real; they answer a wider question than the one that was asked."""
+    _lenient_server(fake_odoo)
     r = invoke("search", "res.partner", "--fields", "name,nope", "--lenient-fields")
-    assert r.exit_code == 0
-    assert json.loads(r.stderr)["warning"] == "invalid_field_removed"
+    assert json.loads(r.stdout) == [{"id": 1}]
+    assert r.exit_code == 5
+    lines = [json.loads(line) for line in r.stderr.strip().splitlines()]
+    assert lines[0]["warning"] == "invalid_field_removed"
+    error = lines[-1]["error"]
+    assert error["code"] == "result_repaired"
+    assert "nope" in error["message"]
+
+
+def test_search_lenient_exits_0_when_it_had_nothing_to_repair(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on("res.partner", "search_read", [{"id": 1}])
+    r = invoke("search", "res.partner", "--fields", "name", "--lenient-fields")
+    assert r.exit_code == 0 and r.stderr.strip() == ""
+
+
+def test_without_the_flag_a_rejected_field_is_still_an_error(fake_odoo: FakeOdoo) -> None:
+    _lenient_server(fake_odoo)
+    r = invoke("search", "res.partner", "--fields", "name,nope")
+    assert r.exit_code == 1
 
 
 def test_bad_where_exit_2(fake_odoo: FakeOdoo) -> None:

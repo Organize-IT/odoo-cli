@@ -63,6 +63,7 @@ version, a CHANGELOG entry and a README update in the same commit.
 | bad arguments, unknown field | | `{"error": {...}}` | 2 |
 | connection, auth, no profile | | `{"error": {...}}` | 3 |
 | refused by a guard | | `{"error": {...}}` | 4 |
+| query repaired to run (`--lenient-fields`) | rows | `{"error": {...}}` | 5 |
 
 stdout carries data and nothing else — no banners, no progress, no warnings.
 Every diagnostic is one JSON object per line on stderr. An exit code never
@@ -96,6 +97,16 @@ apply write guards, validate fields, then call.
 
 Writes are off unless the connection says otherwise. `unlink` and any `call` to
 a method outside `READ_SAFE_METHODS` need `--yes` on top.
+
+### A repaired result is not a successful one
+
+`--lenient-fields` exists because Odoo's field names drift between versions and exploring a
+strange tenant otherwise means a round trip per typo. It removes what the server rejects and
+retries — which means the rows it returns answer a *wider* question than the one asked.
+
+It prints those rows, because they are real and useful, and then exits 5. Nothing else in
+this tool returns data that does not match the request, and nothing else may: a query that
+silently loses a filter is how a batch operates on the wrong records.
 
 ### Validation never invents a refusal
 

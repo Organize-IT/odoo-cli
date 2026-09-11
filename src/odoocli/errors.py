@@ -79,6 +79,17 @@ class OdooUsageError(OdooError):
     default_code = "usage_error"
 
 
+class OdooRepairedError(OdooError):
+    """The query was repaired to make it run, so the result answers a wider question.
+
+    Raised after the data has been printed: the rows are real, they are simply not the
+    rows that were asked for. A human exploring can ignore it; a script cannot.
+    """
+
+    exit_code = 5
+    default_code = "result_repaired"
+
+
 _BY_EXCEPTION_NAME: dict[str, type[OdooError]] = {
     "odoo.exceptions.AccessDenied": OdooAuthError,
     "odoo.exceptions.AccessError": OdooAccessError,
