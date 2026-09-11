@@ -10,14 +10,20 @@ Both are pure sugar: they expand to an ordinary domain before anything is sent,
 they never change the shape of the result, and the technical model name always
 keeps working. Aliases apply to read commands only — writing through a name
 that hides a filter would be a good way to create the wrong record.
+
+The tables below ship with the tool. A profile file may add its own under
+``[aliases]`` and ``[presets]``; a user entry with a built-in name replaces it,
+because the tenant knows its own vocabulary better than this file does.
 """
 
 from __future__ import annotations
 
 import difflib
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 # Dynamic operands, substituted when a preset is expanded.
@@ -141,7 +147,112 @@ PRESETS: Mapping[str, Preset] = {
 }
 
 
-# ----- lookup -----
+# ----- registry -----
+
+
+@dataclass(frozen=True, slots=True)
+class Registry:
+    """The alias and preset tables in force for one invocation."""
+
+    aliases: Mapping[str, Alias]
+    presets: Mapping[str, Preset]
+
+    def resolve(self, name: str) -> Alias | None:
+        return self.aliases.get(name.strip().lower())
+
+    def resolve_model(self, name: str) -> str:
+        alias = self.resolve(name)
+        return alias.model if alias else name
+
+    def suggest(self, name: str) -> list[str]:
+        return difflib.get_close_matches(
+            name.strip().lower(), sorted(self.aliases), n=3, cutoff=0.6
+        )
+
+    def preset(self, model: str, name: str) -> Preset | None:
+        found = self.presets.get(name.strip().lower())
+        if found is None or (found.models and model not in found.models):
+            return None
+        return found
+
+    def presets_for(self, model: str | None) -> dict[str, Preset]:
+        if model is None:
+            return dict(self.presets)
+        return {n: p for n, p in self.presets.items() if not p.models or model in p.models}
+
+    def expand(self, model: str, token: str, today: date | None = None) -> list[list[Any]] | None:
+        found = self.preset(model, token)
+        return None if found is None else found.clauses(today or date.today())
+
+    def rows(self) -> list[dict[str, Any]]:
+        """Table-friendly listing, marking which entries came from the config file."""
+        return [
+            {
+                "alias": name,
+                "model": alias.model,
+                "filter": ", ".join(f"{f} {o} {v}" for f, o, v in alias.domain),
+                "presets": ", ".join(sorted(self.presets_for(alias.model))),
+                "source": "config" if name not in ALIASES or ALIASES[name] != alias else "builtin",
+                "help": alias.help,
+            }
+            for name, alias in sorted(self.aliases.items())
+        ]
+
+
+BUILTIN = Registry(ALIASES, PRESETS)
+
+
+def _leaves(raw: Any, where: str) -> tuple[tuple[str, str, Any], ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{where}: 'domain' must be a list of [field, operator, value]")
+    out: list[tuple[str, str, Any]] = []
+    for leaf in raw:
+        if not isinstance(leaf, list | tuple) or len(leaf) != 3 or not isinstance(leaf[0], str):
+            raise ValueError(
+                f"{where}: every clause must be [field, operator, value], got {leaf!r}"
+            )
+        out.append((str(leaf[0]), str(leaf[1]), leaf[2]))
+    return tuple(out)
+
+
+def from_config(path: Path) -> Registry:
+    """Merge ``[aliases]`` and ``[presets]`` from a profile file over the built-in tables.
+
+    A malformed entry raises rather than being skipped: a filter the caller believes is
+    applied and is not is exactly the failure this whole mechanism exists to avoid.
+    """
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return BUILTIN
+    user_aliases = dict(ALIASES)
+    for name, table in (raw.get("aliases") or {}).items():
+        if not isinstance(table, dict):
+            continue
+        model = table.get("model")
+        if not isinstance(model, str) or "." not in model:
+            raise ValueError(f"alias '{name}': 'model' must be a technical Odoo model name")
+        user_aliases[name.strip().lower()] = Alias(
+            model=model,
+            domain=_leaves(table.get("domain"), f"alias '{name}'"),
+            help=str(table.get("help", "")),
+        )
+    user_presets = dict(PRESETS)
+    for name, table in (raw.get("presets") or {}).items():
+        if not isinstance(table, dict):
+            continue
+        models = table.get("models") or []
+        user_presets[name.strip().lower()] = Preset(
+            domain=_leaves(table.get("domain"), f"preset '{name}'"),
+            help=str(table.get("help", "")),
+            models=tuple(str(m) for m in models) if isinstance(models, list) else (),
+        )
+    return Registry(user_aliases, user_presets)
+
+
+# ----- lookup (the built-in tables) -----
 
 
 def resolve(name: str) -> Alias | None:

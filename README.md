@@ -112,6 +112,31 @@ A bare word is looked up as a preset for the model: `-w overdue`, `-w unpaid`, `
 `-w confirmed`, `-w archived`. `odoo alias MODEL --presets` lists the ones that apply. A bare
 word that is not a preset exits 2 listing the ones that are.
 
+## Your own names
+
+The shipped table covers what most tenants call things. A profile file adds the rest, and a
+user entry replaces a built-in of the same name — your tenant knows its vocabulary better than
+this tool does:
+
+```toml
+[aliases.subscriptions]
+model = "sale.subscription"
+domain = [["stage_category", "=", "progress"]]
+help = "Running subscriptions"
+
+[aliases.invoices]                     # replaces the built-in
+model = "account.move"
+domain = [["move_type", "=", "out_invoice"], ["company_id", "=", 3]]
+
+[presets.mine]
+domain = [["user_id", "=", 7]]
+models = ["crm.lead", "sale.order"]
+```
+
+`odoo alias` marks each entry `builtin` or `config`. A malformed table fails the command with
+exit 2 instead of being skipped: a filter you believe is applied and is not is exactly what
+this mechanism exists to avoid. Dynamic dates work too — `@today`, `@month-start`, `@year-start`.
+
 ## Names and typos
 
 Read commands accept an alias in place of a technical model name (`invoices`, `customers`,

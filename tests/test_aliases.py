@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from odoocli import aliases
+from odoocli.aliases import BUILTIN
 from odoocli.cli.app import app, read_target, write_target
 from odoocli.domain import build_domain
 from odoocli.errors import OdooUsageError
@@ -127,30 +128,30 @@ def test_malformed_condition_keeps_its_own_error() -> None:
 
 
 def test_read_target_returns_model_and_clauses() -> None:
-    assert read_target("invoices") == ("account.move", [["move_type", "=", "out_invoice"]])
-    assert read_target("res.partner") == ("res.partner", [])
+    assert read_target(BUILTIN, "invoices") == ("account.move", [["move_type", "=", "out_invoice"]])
+    assert read_target(BUILTIN, "res.partner") == ("res.partner", [])
 
 
 def test_write_target_refuses_a_filtered_alias() -> None:
     with pytest.raises(OdooUsageError) as excinfo:
-        write_target("invoices")
+        write_target(BUILTIN, "invoices")
     assert excinfo.value.code == "alias_not_writable"
     assert "account.move" in excinfo.value.message
 
 
 def test_write_target_accepts_a_plain_alias() -> None:
-    assert write_target("partners") == "res.partner"
+    assert write_target(BUILTIN, "partners") == "res.partner"
 
 
 def test_unknown_dotless_name_suggests_an_alias() -> None:
     with pytest.raises(OdooUsageError) as excinfo:
-        read_target("invoces")
+        read_target(BUILTIN, "invoces")
     assert excinfo.value.code == "unknown_model"
     assert "invoices" in excinfo.value.message
 
 
 def test_unknown_dotted_name_is_left_to_the_server() -> None:
-    assert read_target("not.a.model") == ("not.a.model", [])
+    assert read_target(BUILTIN, "not.a.model") == ("not.a.model", [])
 
 
 # ----- CLI -----

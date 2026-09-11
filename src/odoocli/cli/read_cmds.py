@@ -101,7 +101,7 @@ def fields(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> dict[str, dict[str, Any]]:
-        target, _base = read_target(model)
+        target, _base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
         return await client.fields_get(target, None if all_attributes else FIELD_ATTRIBUTES)
 
@@ -180,9 +180,9 @@ def search(
         return await client.search_read(target, dom, flds, lim, off, order)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[Any]:
-        target, base = read_target(model)
+        target, base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
-        dom = build_domain(domain, where, model=target, base=base)
+        dom = build_domain(domain, where, model=target, base=base, registry=sess.registry())
         flds = split_fields(fields_)
         await check_fields(sess, client, profile, target, fields=flds, domain=dom, order=order)
         if ids_only:
@@ -229,9 +229,9 @@ def count(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> int:
-        target, base = read_target(model)
+        target, base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
-        dom = build_domain(domain, where, model=target, base=base)
+        dom = build_domain(domain, where, model=target, base=base, registry=sess.registry())
         await check_fields(sess, client, profile, target, domain=dom)
         return await client.search_count(target, dom)
 
@@ -264,9 +264,9 @@ def group(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
-        target, base = read_target(model)
+        target, base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
-        dom = build_domain(domain, where, model=target, base=base)
+        dom = build_domain(domain, where, model=target, base=base, registry=sess.registry())
         groupby = split_fields(by) or []
         if not groupby:
             raise OdooUsageError("--by needs at least one field")
@@ -307,7 +307,7 @@ def read(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
-        target, _base = read_target(model)
+        target, _base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
         id_list = parse_ids(ids)
         flds = split_fields(fields_)

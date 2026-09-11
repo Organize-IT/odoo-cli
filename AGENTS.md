@@ -140,6 +140,13 @@ filters on moved between versions, do not add it. Add a live assertion to
 anything. Dynamic dates use the `@today` / `@month-start` / `@year-start`
 sentinels so tests can inject a date.
 
+Both tables are merged with `[aliases]` and `[presets]` from the profile file at
+the start of every command; a user entry of the same name replaces the built-in.
+A malformed user entry raises rather than being skipped, because a filter the
+caller believes is applied and is not is the failure the whole mechanism exists
+to avoid. Built-in tables are reached through `aliases.BUILTIN`; everything that
+resolves a name at runtime takes a `Registry` instead.
+
 **A client method.** Add it to `AsyncOdooClient`, mirror it in `OdooClient`
 with the same parameter list — `tests/test_cli_parsing.py` fails otherwise —
 and decide its retry safety explicitly.

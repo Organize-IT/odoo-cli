@@ -248,10 +248,12 @@ def parse_where(expr: str) -> list[Any]:
 _BARE_WORD_RE = re.compile(r"^[A-Za-z][\w-]*$")
 
 
-def _parse_condition(model: str | None, token: str, today: date | None) -> list[list[Any]]:
+def _parse_condition(
+    model: str | None, token: str, today: date | None, registry: aliases.Registry
+) -> list[list[Any]]:
     """One ``-w`` token: a preset name if it is one, otherwise a domain leaf."""
     if model is not None:
-        expanded = aliases.expand(model, token, today)
+        expanded = registry.expand(model, token, today)
         if expanded is not None:
             return expanded
     try:
@@ -259,7 +261,7 @@ def _parse_condition(model: str | None, token: str, today: date | None) -> list[
     except OdooUsageError:
         if not _BARE_WORD_RE.match(token.strip()):
             raise
-        known = sorted(aliases.presets_for(model))
+        known = sorted(registry.presets_for(model))
         raise OdooUsageError(
             f"{token!r} is neither a condition nor a preset"
             + (f" for {model}" if model else "")
@@ -275,15 +277,17 @@ def build_domain(
     model: str | None = None,
     base: list[list[Any]] | None = None,
     today: date | None = None,
+    registry: aliases.Registry | None = None,
 ) -> list[Any]:
     """AND the alias clauses, an optional JSON domain and every ``-w`` condition.
 
     ``model`` enables preset names in ``-w``; without it every token must be a
     plain ``field op value`` condition.
     """
+    table = registry or aliases.BUILTIN
     out: list[Any] = list(base or [])
     if domain:
         out += sanitize_domain(normalize_domain(domain))
     for token in where:
-        out += _parse_condition(model, token, today)
+        out += _parse_condition(model, token, today, table)
     return out

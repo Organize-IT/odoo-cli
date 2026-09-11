@@ -75,7 +75,7 @@ def create(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        target = write_target(model)
+        target = write_target(sess.registry(), model)
         check_model(sess, profile, target)
         vals = _merge_values(values, json_values)
         if not dry_run:
@@ -104,7 +104,7 @@ def write(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        target = write_target(model)
+        target = write_target(sess.registry(), model)
         check_model(sess, profile, target)
         id_list = parse_ids(ids)
         vals = _merge_values(values, json_values)
@@ -132,7 +132,7 @@ def unlink(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        target = write_target(model)
+        target = write_target(sess.registry(), model)
         check_model(sess, profile, target)
         id_list = parse_ids(ids)
         if dry_run:
@@ -165,7 +165,7 @@ def call(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> Any:
-        target = write_target(model)
+        target = write_target(sess.registry(), model)
         check_model(sess, profile, target)
         pos = parse_json_arg(args, "args") or []
         if not isinstance(pos, list):
