@@ -89,6 +89,19 @@ def hoist_global_options(args: list[str], value_options: frozenset[str] = frozen
 
 
 class _RootGroup(TyperGroup):
+    def invoke(self, ctx: Any) -> object:
+        """Map every OdooError to its exit code, not only those raised inside ``run()``.
+
+        Offline commands (``alias``, ``cache``) never open a client, so without this they
+        would escape as a traceback and exit 1 whatever the error said.
+        """
+        try:
+            return super().invoke(ctx)
+        except OdooError as e:
+            session_obj = ctx.obj if isinstance(ctx.obj, Session) else None
+            fail(e, bool(session_obj is not None and session_obj.verbose))
+            raise  # unreachable: fail() raises typer.Exit
+
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
         return super().parse_args(ctx, hoist_global_options(args, self._value_options(ctx, args)))
 
@@ -154,9 +167,19 @@ class Session:
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     config: Path = field(default_factory=lambda: config_path(os.environ))
     _store: SchemaStore | None = field(default=None, repr=False, compare=False)
+    _registry: aliases.Registry | None = field(default=None, repr=False, compare=False)
 
     def profile(self) -> Profile:
         return resolve_profile(self.profile_name, self.env, self.config)
+
+    def registry(self) -> aliases.Registry:
+        """Alias and preset tables, built-ins merged with anything the config file adds."""
+        if self._registry is None:
+            try:
+                self._registry = aliases.from_config(self.config)
+            except ValueError as e:
+                raise OdooUsageError(f"{self.config}: {e}", code="invalid_alias_table") from e
+        return self._registry
 
     def store(self, profile: Profile) -> SchemaStore:
         """Schema cache for this connection, created once per command."""
@@ -322,9 +345,9 @@ def fail(err: OdooError, verbose: bool) -> None:
     raise typer.Exit(err.exit_code)
 
 
-def _unknown_name(name: str) -> OdooUsageError | None:
+def _unknown_name(registry: aliases.Registry, name: str) -> OdooUsageError | None:
     """A name with no dot that is close to an alias is almost certainly a typo."""
-    close = aliases.suggest_alias(name)
+    close = registry.suggest(name)
     if "." in name or not close:
         return None
     return OdooUsageError(
@@ -335,22 +358,22 @@ def _unknown_name(name: str) -> OdooUsageError | None:
     )
 
 
-def read_target(name: str) -> tuple[str, list[list[Any]]]:
+def read_target(registry: aliases.Registry, name: str) -> tuple[str, list[list[Any]]]:
     """Resolve a model name or alias for a read command, with its base clauses."""
-    alias = aliases.resolve(name)
+    alias = registry.resolve(name)
     if alias is not None:
         return alias.model, alias.clauses()
-    problem = _unknown_name(name)
+    problem = _unknown_name(registry, name)
     if problem is not None:
         raise problem
     return name, []
 
 
-def write_target(name: str) -> str:
+def write_target(registry: aliases.Registry, name: str) -> str:
     """Resolve a model name for a write command. Filtered aliases are refused."""
-    alias = aliases.resolve(name)
+    alias = registry.resolve(name)
     if alias is None:
-        problem = _unknown_name(name)
+        problem = _unknown_name(registry, name)
         if problem is not None:
             raise problem
         return name

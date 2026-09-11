@@ -40,7 +40,8 @@ odoo group invoices -w unpaid --by partner_id --sum amount_residual
 anything is sent, and the technical names keep working. Full documentation:
 [Organize-IT.github.io/odoo-cli](https://github.com/Organize-IT/odoo-cli/tree/main/docs).
 
-Prefer named connections? They live in a `0600` TOML file:
+Prefer named connections? They live in a TOML file written owner-only where the platform
+can enforce that — `odoo profile path --check` says whether it can:
 
 ```bash
 odoo profile add acme --url https://acme.odoo.com --db acme --login bot@acme.com \
@@ -57,7 +58,10 @@ First match wins, and the CLI never prompts:
 3. a profile named `default`
 
 Nothing found: exit code 3 with a message listing those three ways. A profile stores the key
-(`--api-key`) or points to an env var (`--api-key-env`). `odoo profile path` shows the file.
+(`--api-key`) or points to an env var (`--api-key-env`). `odoo profile path` shows the file,
+`--check` reports what its permissions are actually worth: mode 600 means owner-only on
+POSIX and nothing at all on Windows, where `chmod` only toggles a read-only attribute. On
+such a platform, prefer `--api-key-env` and keep the key in your secret manager.
 
 ## Output contract
 
@@ -69,6 +73,7 @@ Nothing found: exit code 3 with a message listing those three ways. A profile st
 | bad arguments | | `{"error": ...}` | 2 |
 | connection, auth, no profile | | `{"error": ...}` | 3 |
 | refused by a guard | | `{"error": ...}` | 4 |
+| query repaired to run | rows | `{"error": ...}` | 5 |
 | write executed | result | `{"write": {"model", "method", "ids", "fields"}}` | 0 |
 
 Data is never humanised: many2one fields stay `[id, "name"]`, empty values stay `false`.
@@ -106,6 +111,31 @@ Values: `true/false/null`, integers, floats, JSON lists or objects, quoted strin
 A bare word is looked up as a preset for the model: `-w overdue`, `-w unpaid`, `-w draft`,
 `-w confirmed`, `-w archived`. `odoo alias MODEL --presets` lists the ones that apply. A bare
 word that is not a preset exits 2 listing the ones that are.
+
+## Your own names
+
+The shipped table covers what most tenants call things. A profile file adds the rest, and a
+user entry replaces a built-in of the same name — your tenant knows its vocabulary better than
+this tool does:
+
+```toml
+[aliases.subscriptions]
+model = "sale.subscription"
+domain = [["stage_category", "=", "progress"]]
+help = "Running subscriptions"
+
+[aliases.invoices]                     # replaces the built-in
+model = "account.move"
+domain = [["move_type", "=", "out_invoice"], ["company_id", "=", 3]]
+
+[presets.mine]
+domain = [["user_id", "=", 7]]
+models = ["crm.lead", "sale.order"]
+```
+
+`odoo alias` marks each entry `builtin` or `config`. A malformed table fails the command with
+exit 2 instead of being skipped: a filter you believe is applied and is not is exactly what
+this mechanism exists to avoid. Dynamic dates work too — `@today`, `@month-start`, `@year-start`.
 
 ## Names and typos
 
@@ -165,8 +195,9 @@ are refused unless `--include-sensitive`.
   many2one shapes) and recipes.
 - The same text ships as an [Agent Skill](https://github.com/Organize-IT/odoo-cli/blob/main/SKILL.md):
   `npx skills add Organize-IT/odoo-cli`.
-- `odoo search ... --lenient-fields` removes fields Odoo rejects and retries, with a warning on
-  stderr. Exploration only.
+- `odoo search ... --lenient-fields` removes fields Odoo rejects and retries. It prints the
+  rows, then exits **5**: they answer a wider question than the one you asked. Exploration
+  stays comfortable; a script that checks its exit codes cannot be fooled by it.
 
 ## Library
 
@@ -227,7 +258,8 @@ published to PyPI on `v*` tags through trusted publishing, with every action pin
 commit digest.
 
 `AGENTS.md` is the specification: layering, the contracts that may not change silently, and
-the definition of done. Read it before changing anything.
+the definition of done. [docs/decisions/](docs/decisions/) records the decisions with a real
+trade-off behind them. Read both before changing anything.
 
 ## License
 

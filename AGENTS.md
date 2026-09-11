@@ -63,6 +63,7 @@ version, a CHANGELOG entry and a README update in the same commit.
 | bad arguments, unknown field | | `{"error": {...}}` | 2 |
 | connection, auth, no profile | | `{"error": {...}}` | 3 |
 | refused by a guard | | `{"error": {...}}` | 4 |
+| query repaired to run (`--lenient-fields`) | rows | `{"error": {...}}` | 5 |
 
 stdout carries data and nothing else — no banners, no progress, no warnings.
 Every diagnostic is one JSON object per line on stderr. An exit code never
@@ -97,6 +98,16 @@ apply write guards, validate fields, then call.
 Writes are off unless the connection says otherwise. `unlink` and any `call` to
 a method outside `READ_SAFE_METHODS` need `--yes` on top.
 
+### A repaired result is not a successful one
+
+`--lenient-fields` exists because Odoo's field names drift between versions and exploring a
+strange tenant otherwise means a round trip per typo. It removes what the server rejects and
+retries — which means the rows it returns answer a *wider* question than the one asked.
+
+It prints those rows, because they are real and useful, and then exits 5. Nothing else in
+this tool returns data that does not match the request, and nothing else may: a query that
+silently loses a filter is how a batch operates on the wrong records.
+
 ### Validation never invents a refusal
 
 `schema.py` may only reject a field name it has positively read from the
@@ -129,6 +140,13 @@ filters on moved between versions, do not add it. Add a live assertion to
 anything. Dynamic dates use the `@today` / `@month-start` / `@year-start`
 sentinels so tests can inject a date.
 
+Both tables are merged with `[aliases]` and `[presets]` from the profile file at
+the start of every command; a user entry of the same name replaces the built-in.
+A malformed user entry raises rather than being skipped, because a filter the
+caller believes is applied and is not is the failure the whole mechanism exists
+to avoid. Built-in tables are reached through `aliases.BUILTIN`; everything that
+resolves a name at runtime takes a `Registry` instead.
+
 **A client method.** Add it to `AsyncOdooClient`, mirror it in `OdooClient`
 with the same parameter list — `tests/test_cli_parsing.py` fails otherwise —
 and decide its retry safety explicitly.
@@ -149,6 +167,9 @@ A change is finished when all of these are true:
 6. `CHANGELOG.md` has an entry under the unreleased heading.
 7. Anything touching version-specific Odoo behaviour has a live assertion in
    `tests/integration/test_live.py`, which runs against 17, 18 and 19.
+8. A decision with a real trade-off gets an ADR in `docs/decisions/`, and the ADR
+   says what would change our mind. A decision recorded without its exit condition
+   is an assertion, not a decision.
 
 ## Testing
 
@@ -170,7 +191,11 @@ every test. Never let a test write to the user's real cache or config.
 - Secrets never reach stdout: `redact()` runs on everything `emit()` prints.
 - Secrets never reach logs: `--debug` logs method names, ids and durations, not
   arguments.
-- The profile file is written `0600` inside a `0700` directory, atomically.
+- The profile file is written atomically, owner-only, inside an owner-only directory. The
+  temporary file is *created* with mode 600 rather than created and then chmod-ed, so a
+  permissive umask never leaves the API key in a world-readable file. `chmod` carries that
+  meaning on POSIX and none on Windows: `permissions_enforced()` says which, `odoo profile
+  path --check` reports it, and no document may claim the stronger one unconditionally.
 - `SENSITIVE_MODELS` are refused by default because reading them leaks secrets
   or writing them executes code.
 - CI actions are pinned to commit digests and workflows default to

@@ -11,6 +11,7 @@ from odoocli.cli.app import (
     check_fields,
     check_model,
     emit,
+    fail,
     read_target,
     run,
     session,
@@ -20,7 +21,7 @@ from odoocli.cli.values import parse_ids, split_fields
 from odoocli.client import AsyncOdooClient
 from odoocli.config import Profile
 from odoocli.domain import build_domain
-from odoocli.errors import OdooMissingError, OdooUsageError
+from odoocli.errors import OdooMissingError, OdooRepairedError, OdooUsageError
 from odoocli.lenient import lenient_search_read
 
 DEFAULT_LIMIT = 80
@@ -100,7 +101,7 @@ def fields(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> dict[str, dict[str, Any]]:
-        target, _base = read_target(model)
+        target, _base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
         return await client.fields_get(target, None if all_attributes else FIELD_ATTRIBUTES)
 
@@ -147,7 +148,9 @@ def search(
         False, "--all", help="Fetch every match, paginated. Prefer --format jsonl."
     ),
     lenient: bool = typer.Option(
-        False, "--lenient-fields", help="Drop fields Odoo rejects and retry (warns on stderr)."
+        False,
+        "--lenient-fields",
+        help="Drop fields Odoo rejects and retry. Prints the rows, then exits 5 if it had to.",
     ),
     ids_only: bool = typer.Option(
         False, "--ids-only", help="Return matching ids only (ORM search instead of search_read)."
@@ -155,6 +158,12 @@ def search(
 ) -> None:
     """search_read on a model. Output is the raw Odoo result."""
     sess = session(ctx)
+    repairs: list[dict[str, Any]] = []
+
+    def note_repair(payload: dict[str, Any]) -> None:
+        """A repair is a warning *and* a fact the exit code has to carry."""
+        repairs.append(payload)
+        warn(payload)
 
     async def fetch(
         client: AsyncOdooClient,
@@ -166,14 +175,14 @@ def search(
     ) -> list[dict[str, Any]]:
         if lenient:
             return await lenient_search_read(
-                client, target, dom, flds, lim, off, order, on_warning=warn
+                client, target, dom, flds, lim, off, order, on_warning=note_repair
             )
         return await client.search_read(target, dom, flds, lim, off, order)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[Any]:
-        target, base = read_target(model)
+        target, base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
-        dom = build_domain(domain, where, model=target, base=base)
+        dom = build_domain(domain, where, model=target, base=base, registry=sess.registry())
         flds = split_fields(fields_)
         await check_fields(sess, client, profile, target, fields=flds, domain=dom, order=order)
         if ids_only:
@@ -197,6 +206,16 @@ def search(
             off += PAGE_SIZE
 
     emit(ctx, run(ctx, go))
+    if repairs:
+        removed = sorted({str(r.get("field")) for r in repairs})
+        fail(
+            OdooRepairedError(
+                f"--lenient-fields removed {', '.join(removed)} to make the query run: "
+                "the rows above answer a wider question than the one you asked.",
+                data={"removed_fields": removed, "repairs": repairs},
+            ),
+            sess.verbose,
+        )
 
 
 @app.command()
@@ -210,9 +229,9 @@ def count(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> int:
-        target, base = read_target(model)
+        target, base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
-        dom = build_domain(domain, where, model=target, base=base)
+        dom = build_domain(domain, where, model=target, base=base, registry=sess.registry())
         await check_fields(sess, client, profile, target, domain=dom)
         return await client.search_count(target, dom)
 
@@ -245,9 +264,9 @@ def group(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
-        target, base = read_target(model)
+        target, base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
-        dom = build_domain(domain, where, model=target, base=base)
+        dom = build_domain(domain, where, model=target, base=base, registry=sess.registry())
         groupby = split_fields(by) or []
         if not groupby:
             raise OdooUsageError("--by needs at least one field")
@@ -288,7 +307,7 @@ def read(
     sess = session(ctx)
 
     async def go(client: AsyncOdooClient, profile: Profile) -> list[dict[str, Any]]:
-        target, _base = read_target(model)
+        target, _base = read_target(sess.registry(), model)
         check_model(sess, profile, target)
         id_list = parse_ids(ids)
         flds = split_fields(fields_)

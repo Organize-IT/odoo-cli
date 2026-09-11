@@ -40,7 +40,7 @@ async def test_invalid_field_removed_from_fields_and_domain(fake_odoo: FakeOdoo)
         {"warning": "invalid_field_removed", "field": "mobile", "from": ["fields", "domain"]}
     ]
     last_args, last_kwargs = fake_odoo.calls[-1][2], fake_odoo.calls[-1][3]
-    assert last_args == [[["phone", "!=", False]]]
+    assert last_args == [[]], "the disjunction is unconstrained once mobile is gone"
     assert last_kwargs["fields"] == ["name"]
 
 

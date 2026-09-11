@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import stat
 from typing import Any
 
 import typer
 
-from odoocli.cli.app import app, emit, fail, session
+from odoocli.cli.app import app, emit, fail, session, warn
 from odoocli.cli.read_cmds import info
-from odoocli.config import load_profiles, remove_profile, save_profile
+from odoocli.config import load_profiles, permissions_enforced, remove_profile, save_profile
 from odoocli.errors import OdooConnectionError
 
 profile_app = typer.Typer(
@@ -111,6 +112,39 @@ def profile_remove(ctx: typer.Context, name: str = typer.Argument(...)) -> None:
 
 
 @profile_app.command("path")
-def profile_path(ctx: typer.Context) -> None:
-    """Print the config file path."""
-    typer.echo(str(session(ctx).config))
+def profile_path(
+    ctx: typer.Context,
+    check: bool = typer.Option(
+        False, "--check", help="Also report whether the file is really owner-only here."
+    ),
+) -> None:
+    """Print the config file path; --check reports what its permissions are worth."""
+    sess = session(ctx)
+    if not check:
+        typer.echo(str(sess.config))
+        return
+    path = sess.config
+    mode = None
+    if path.exists():
+        mode = oct(stat.S_IMODE(path.stat().st_mode))
+    emit(
+        ctx,
+        {
+            "path": str(path),
+            "exists": path.exists(),
+            "mode": mode,
+            "owner_only_permissions": permissions_enforced(),
+        },
+    )
+    if not permissions_enforced():
+        warn(
+            {
+                "warning": "permissions_not_enforced",
+                "path": str(path),
+                "message": (
+                    "This platform cannot restrict the file to its owner: treat the stored "
+                    "API key as readable by anyone with access to this machine, or use "
+                    "--api-key-env instead of --api-key."
+                ),
+            }
+        )

@@ -1,3 +1,5 @@
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -5,6 +7,7 @@ import pytest
 from odoocli.config import (
     config_path,
     load_profiles,
+    permissions_enforced,
     remove_profile,
     resolve_profile,
     save_profile,
@@ -132,3 +135,45 @@ def test_verify_ssl_from_env_and_profile(tmp_path: Path) -> None:
 def test_profile_repr_hides_api_key(tmp_path: Path) -> None:
     p = resolve_profile(None, ENV_FULL, tmp_path / "n.toml")
     assert "api_key" not in repr(p) and ENV_FULL["ODOO_API_KEY"] not in repr(p)
+
+
+# ----- what the file permissions are actually worth -----
+
+
+@pytest.mark.skipif(not permissions_enforced(), reason="POSIX permissions only")
+def test_the_profile_file_is_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / "nested" / "config.toml"
+    save_profile(path, "a", {"url": "https://x", "database": "d", "login": "l", "api_key": "k"})
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.skipif(not permissions_enforced(), reason="POSIX permissions only")
+def test_a_permissive_umask_never_widens_the_file(tmp_path: Path) -> None:
+    """The key must never exist in a world-readable file, not even briefly."""
+    path = tmp_path / "config.toml"
+    previous = os.umask(0o000)
+    try:
+        save_profile(path, "a", {"url": "https://x", "database": "d", "login": "l", "api_key": "k"})
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(not permissions_enforced(), reason="POSIX permissions only")
+def test_rewriting_keeps_the_mode(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    save_profile(path, "a", {"url": "https://x", "database": "d", "login": "l", "api_key": "k"})
+    path.chmod(0o644)
+    save_profile(path, "b", {"url": "https://y", "database": "d", "login": "l", "api_key": "k"})
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_no_temporary_file_survives_a_write(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    save_profile(path, "a", {"url": "https://x", "database": "d", "login": "l", "api_key": "k"})
+    assert [p.name for p in tmp_path.iterdir()] == ["config.toml"]
+
+
+def test_permissions_enforced_answers_for_this_platform() -> None:
+    assert permissions_enforced() is (os.name == "posix")

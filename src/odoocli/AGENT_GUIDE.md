@@ -13,6 +13,8 @@ Resolution order, first match wins:
 3. A profile named `default`
 
 Nothing resolved: exit code 3 and a message listing these three ways. The CLI never prompts.
+`odoo profile path --check` says whether the stored key is really owner-only on this
+platform; on Windows it is not, so prefer `--api-key-env` there.
 `ODOO_API_KEY` accepts an Odoo API key (preferred) or the user's password.
 Check a connection with `odoo info`. Self-signed on-prem server: `--insecure`
 (or `odoo profile add ... --no-verify-ssl`).
@@ -86,7 +88,8 @@ Refresh it after a module install or an Odoo upgrade with `odoo cache clear`.
 - Errors: one JSON object on stderr, `{"error": {"code": ..., "message": ..., "odoo": {...}}}`.
 - Warnings and write logs: one JSON object per line on stderr.
 - Exit codes: `0` ok, `1` Odoo raised, `2` bad usage, `3` connection or authentication,
-  `4` refused by a guard (writes disabled, missing `--yes`, sensitive model).
+  `4` refused by a guard (writes disabled, missing `--yes`, sensitive model), `5` the query
+  was repaired to make it run, so the rows answer a wider question than the one you asked.
 - Values of fields named like `password`, `api_key`, `secret` are replaced by `[redacted]`
   unless `--no-redact`.
 
@@ -168,8 +171,9 @@ One2many and many2many fields take Odoo commands, written as JSON in `-v` or `--
 6. Dates are strings, `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` in UTC.
 7. Field names drift between Odoo 17, 18 and 19 (for example `account.account.company_id`
    became `company_ids`). If a field is rejected, `odoo fields` is the truth.
-   `--lenient-fields` on `search` removes rejected fields and retries, with a warning on
-   stderr; only use it for exploration, never in a script that relies on the result.
+   `--lenient-fields` on `search` removes rejected fields and retries. It prints the rows and
+   then exits 5, because they answer a wider question than the one you asked. Use it to
+   explore; if you keep it in a script, check the exit code.
 8. Never guess a model name: `odoo alias`, then `odoo models --like invoice`. A dotless
    name close to a known alias is reported as a typo instead of being sent.
 9. Sensitive models (`ir.config_parameter`, `ir.mail_server`, `res.users.apikeys`, `ir.cron`,

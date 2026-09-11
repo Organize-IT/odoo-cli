@@ -9,6 +9,7 @@ from odoocli.errors import (
     OdooError,
     OdooMissingError,
     OdooRefusedError,
+    OdooRepairedError,
     OdooUsageError,
     OdooValidationError,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "OdooError",
     "OdooMissingError",
     "OdooRefusedError",
+    "OdooRepairedError",
     "OdooUsageError",
     "OdooValidationError",
     "__version__",

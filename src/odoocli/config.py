@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tomllib
 from collections.abc import Mapping
@@ -69,13 +70,41 @@ def _read(path: Path) -> dict[str, Any]:
         return tomllib.load(fh)
 
 
+FILE_MODE = 0o600
+DIR_MODE = 0o700
+
+
+def permissions_enforced() -> bool:
+    """Whether ``chmod`` actually keeps other users out on this platform.
+
+    On POSIX, mode 600 means what it says. On Windows ``os.chmod`` only toggles the
+    read-only attribute, so the file is as readable as anything else in the user's
+    profile directory. The tool says which of the two it is instead of implying the
+    stronger one everywhere.
+    """
+    return os.name == "posix"
+
+
 def _write(path: Path, data: dict[str, Any]) -> None:
+    """Write the profiles atomically, and never leave the key readable in between.
+
+    The temporary file is *created* with mode 600 rather than created and then
+    chmod-ed: with a permissive umask, the second form leaves a window in which the
+    API key sits in a world-readable file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    os.chmod(path.parent, 0o700)
+    with contextlib.suppress(OSError):
+        os.chmod(path.parent, DIR_MODE)
     tmp = path.with_suffix(".tmp")
-    with tmp.open("wb") as fh:
-        tomli_w.dump(data, fh)
-    os.chmod(tmp, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            tomli_w.dump(data, fh)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    with contextlib.suppress(OSError):
+        os.chmod(tmp, FILE_MODE)
     os.replace(tmp, path)
 
 

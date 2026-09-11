@@ -53,6 +53,14 @@ nav:
       - Field validation: guides/validation.md
       - Writing: guides/writes.md
       - For AI agents: guides/agents.md
+  - Decisions:
+      - Why a CLI returning Odoo JSON: decisions/0001-a-cli-that-returns-odoo-json.md
+      - The output contract: decisions/0002-the-output-contract.md
+      - Retries never replay a write: decisions/0003-retries-never-replay-a-write.md
+      - Guards before the network: decisions/0004-guards-before-the-network.md
+      - Validation never invents a refusal: decisions/0005-validation-never-invents-a-refusal.md
+      - Aliases are sugar: decisions/0006-aliases-are-sugar.md
+      - A repaired query is not a success: decisions/0007-a-repaired-query-is-not-a-success.md
   - Reference:
       - Commands: reference/commands.md
       - Python client: reference/client.md

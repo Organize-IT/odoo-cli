@@ -2,4 +2,4 @@ import odoocli
 
 
 def test_version() -> None:
-    assert odoocli.__version__ == "0.4.0"
+    assert odoocli.__version__ == "0.5.0"
