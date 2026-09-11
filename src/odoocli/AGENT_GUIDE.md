@@ -13,6 +13,8 @@ Resolution order, first match wins:
 3. A profile named `default`
 
 Nothing resolved: exit code 3 and a message listing these three ways. The CLI never prompts.
+`odoo profile path --check` says whether the stored key is really owner-only on this
+platform; on Windows it is not, so prefer `--api-key-env` there.
 `ODOO_API_KEY` accepts an Odoo API key (preferred) or the user's password.
 Check a connection with `odoo info`. Self-signed on-prem server: `--insecure`
 (or `odoo profile add ... --no-verify-ssl`).

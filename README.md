@@ -40,7 +40,8 @@ odoo group invoices -w unpaid --by partner_id --sum amount_residual
 anything is sent, and the technical names keep working. Full documentation:
 [Organize-IT.github.io/odoo-cli](https://github.com/Organize-IT/odoo-cli/tree/main/docs).
 
-Prefer named connections? They live in a `0600` TOML file:
+Prefer named connections? They live in a TOML file written owner-only where the platform
+can enforce that — `odoo profile path --check` says whether it can:
 
 ```bash
 odoo profile add acme --url https://acme.odoo.com --db acme --login bot@acme.com \
@@ -57,7 +58,10 @@ First match wins, and the CLI never prompts:
 3. a profile named `default`
 
 Nothing found: exit code 3 with a message listing those three ways. A profile stores the key
-(`--api-key`) or points to an env var (`--api-key-env`). `odoo profile path` shows the file.
+(`--api-key`) or points to an env var (`--api-key-env`). `odoo profile path` shows the file,
+`--check` reports what its permissions are actually worth: mode 600 means owner-only on
+POSIX and nothing at all on Windows, where `chmod` only toggles a read-only attribute. On
+such a platform, prefer `--api-key-env` and keep the key in your secret manager.
 
 ## Output contract
 

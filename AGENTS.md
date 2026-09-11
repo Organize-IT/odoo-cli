@@ -181,7 +181,11 @@ every test. Never let a test write to the user's real cache or config.
 - Secrets never reach stdout: `redact()` runs on everything `emit()` prints.
 - Secrets never reach logs: `--debug` logs method names, ids and durations, not
   arguments.
-- The profile file is written `0600` inside a `0700` directory, atomically.
+- The profile file is written atomically, owner-only, inside an owner-only directory. The
+  temporary file is *created* with mode 600 rather than created and then chmod-ed, so a
+  permissive umask never leaves the API key in a world-readable file. `chmod` carries that
+  meaning on POSIX and none on Windows: `permissions_enforced()` says which, `odoo profile
+  path --check` reports it, and no document may claim the stronger one unconditionally.
 - `SENSITIVE_MODELS` are refused by default because reading them leaks secrets
   or writing them executes code.
 - CI actions are pinned to commit digests and workflows default to
