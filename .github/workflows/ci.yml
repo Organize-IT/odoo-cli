@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        odoo: ["17.0", "18.0", "19.0"]
+        odoo: ["15.0", "16.0", "17.0", "18.0", "19.0", "20.0"]
     env:
       ODOO_VERSION: ${{ matrix.odoo }}
     steps:
@@ -53,6 +53,28 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --group dev
+      # Odoo 20 has no published image: build it from the pinned commit, with a layer cache
+      # so only a new SHA pays for the pip install. start-odoo.sh reuses the loaded tag.
+      - name: Read the pinned Odoo 20 commit
+        if: matrix.odoo == '20.0'
+        id: odoo20
+        run: |
+          sha="$(tr -d '[:space:]' < docker/odoo20/SHA)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "tag=odoo-src:20.0-${sha:0:12}" >> "$GITHUB_OUTPUT"
+      - if: matrix.odoo == '20.0'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build Odoo 20 from source
+        if: matrix.odoo == '20.0'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/odoo20
+          build-args: ODOO_SHA=${{ steps.odoo20.outputs.sha }}
+          tags: ${{ steps.odoo20.outputs.tag }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=odoo20
+          cache-to: type=gha,mode=max,scope=odoo20
       - name: Start Odoo ${{ matrix.odoo }}
         run: scripts/start-odoo.sh
       - name: Run integration tests

@@ -16,8 +16,10 @@ uv tool install odoo-agent-cli   # or: pipx install odoo-agent-cli
 odoo --version
 ```
 
-Requires Python 3.11+. Works with Odoo 17, 18 and 19 (integration-tested in CI), and should
-work with any version exposing `/jsonrpc` with API keys (14+).
+Requires Python 3.11+. Works with Odoo 15 through 20 (integration-tested in CI on 15.0,
+16.0, 17.0, 18.0, 19.0 and 20.0, Community), and should work with any version exposing
+`/jsonrpc` with API keys (14+). Odoo 20 still serves `/jsonrpc` but logs it as deprecated;
+Odoo plans to remove it in 22.
 
 ## 60 seconds
 
@@ -169,7 +171,10 @@ odoo group invoices -w overdue --by partner_id --sum amount_residual \
 odoo group invoices --by invoice_date:month --sum amount_total
 ```
 
-`read_group` under the hood: counts and totals per group without pulling the records.
+`read_group` under the hood: counts and totals per group without pulling the records. On
+Odoo 20, whose `read_group` no longer answers JSON-RPC callers, it is `formatted_read_group`,
+and its answer is passed through as is: totals are keyed `amount_residual:sum` rather than
+`amount_residual`, and each group's filter is `__extra_domain`.
 
 ## Writes
 
@@ -250,13 +255,15 @@ uv run pytest --cov --cov-report=term-missing   # gated at 93% in CI
 uv run --group docs mkdocs serve     # the documentation site
 
 ODOO_VERSION=17.0 scripts/start-odoo.sh                     # throwaway Odoo in Docker
+                                   # 15.0 to 20.0; 20.0 is built from docker/odoo20/SHA;
+                                   # ODOO_PORT=8169 if 8069 is taken
 ODOO_URL=http://localhost:8069 ODOO_DB=test ODOO_LOGIN=admin ODOO_API_KEY=admin \
 ODOO_ALLOW_WRITES=1 uv run pytest -m integration -o addopts=""
 docker compose -f docker/odoo-compose.yml down -v
 ```
 
 CI runs the unit suite on Python 3.11-3.13 and builds the docs on every PR; the integration
-matrix (Odoo 17.0, 18.0, 19.0) runs on `main`, tags and manual dispatch. Releases are
+matrix (Odoo 15.0 to 20.0) runs on `main`, tags and manual dispatch. Releases are
 published to PyPI on `v*` tags through trusted publishing, with every action pinned to a
 commit digest.
 

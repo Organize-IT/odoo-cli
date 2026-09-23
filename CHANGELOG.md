@@ -35,8 +35,21 @@ All notable changes to this project are documented here. The format follows
   widening-only rules as any other leaf.
 - `OdooFieldMissingError.to_dict()`, which is what the CLI prints on stderr, now carries
   `model`, `field` and `where`, and the server's error under `odoo` like any other Odoo error.
+- `odoo group` failed on Odoo 20 with `read_group() got an unexpected keyword argument
+  'lazy'`: 20 gave the name `read_group` to the ORM's tuple API. When the server rejects
+  `lazy`, and only then, the command calls `formatted_read_group` and prints its answer as is,
+  so totals are keyed `amount_total:sum` there. `--order` on a totalled field is rewritten to
+  the aggregate spec it requires. Nothing changes on 15 to 19. See
+  [ADR 0009](docs/decisions/0009-group-on-odoo-20.md).
 
 ### Added
+
+- The integration suite runs on Odoo 15.0, 16.0, 17.0, 18.0, 19.0 and 20.0 (Community).
+  Odoo 20 has no published image yet: `scripts/start-odoo.sh` builds it from the commit
+  pinned in `docker/odoo20/SHA`, and CI caches the build. New live assertions: every
+  built-in alias and preset filter runs on each version, and `lenient` reads each version's
+  own error messages. `ODOO_PORT` moves the throwaway Odoo off 8069.
+- `formatted_read_group` is a read-safe method: `odoo call` accepts it without `--yes`.
 
 - `OdooFieldMissingError` (exit 2, code `field_missing`) with `.model`, `.field` and `.where`,
   exported from `odoocli`.

@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
+from datetime import date
+from typing import Any
 
 import pytest
 
-from odoocli import OdooClient
+from odoocli import AsyncOdooClient, OdooClient, aliases
+from odoocli.errors import OdooFieldMissingError
+from odoocli.lenient import lenient_search_read
 
 pytestmark = pytest.mark.integration
 
@@ -29,7 +34,8 @@ def cli(*args: str) -> subprocess.CompletedProcess[str]:
 
 def test_version_and_auth(live: OdooClient) -> None:
     v = live.version()
-    assert int(str(v["server_version"]).split(".")[0]) >= 17
+    # The oldest version the integration matrix runs (see .github/workflows/ci.yml).
+    assert int(str(v["server_version"]).split(".")[0]) >= 15
     assert live.authenticate() > 0
 
 
@@ -128,3 +134,76 @@ def test_live_read_group() -> None:
     assert out.returncode == 0, out.stderr
     groups = json.loads(out.stdout)
     assert groups and all("__count" in g for g in groups)
+    # Totals and ordering by a total: Odoo 20 answers through formatted_read_group, which
+    # only orders by an aggregate spec ("color:sum desc"), not by the bare field name.
+    out = cli(
+        "group", "res.partner", "--by", "is_company", "--sum", "color", "--order", "color desc"
+    )
+    assert out.returncode == 0, out.stderr
+    assert all("__count" in g for g in json.loads(out.stdout))
+
+
+def test_live_every_builtin_filter_runs(live: OdooClient) -> None:
+    """Every field a built-in alias or preset filters on exists on this version.
+
+    An alias whose clause names a field the server lacks would be refused (or, repaired,
+    silently widened) on that version. Models whose module is not installed are skipped.
+    """
+    installed = {row["model"] for row in live.search_read("ir.model", [], ["model"])}
+    for name, alias in aliases.ALIASES.items():
+        if alias.domain and alias.model in installed:
+            assert live.search_count(alias.model, alias.clauses()) >= 0, name
+    for name, preset in aliases.PRESETS.items():
+        for model in preset.models or ("res.partner",):
+            if model in installed:
+                assert live.search_count(model, preset.clauses(date.today())) >= 0, name
+
+
+def _lenient(
+    model: str, domain: list[Any], fields: list[str], *, strip_domain: bool = False
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    warnings: list[dict[str, Any]] = []
+
+    async def go() -> list[dict[str, Any]]:
+        async with AsyncOdooClient(
+            os.environ["ODOO_URL"],
+            os.environ["ODOO_DB"],
+            os.environ["ODOO_LOGIN"],
+            os.environ["ODOO_API_KEY"],
+        ) as c:
+            return await lenient_search_read(
+                c,
+                model,
+                domain,
+                fields,
+                1,
+                0,
+                None,
+                strip_domain=strip_domain,
+                on_warning=warnings.append,
+            )
+
+    return asyncio.run(go()), warnings
+
+
+def test_live_lenient_reads_this_versions_error_messages(live: OdooClient) -> None:
+    """The messages ``lenient`` parses are the ones this Odoo version actually sends."""
+    # A missing field in the domain is refused, not dropped, and names the queried model.
+    with pytest.raises(OdooFieldMissingError) as exc:
+        _lenient("res.partner", [["odoocli_missing", "=", 1]], ["id"])
+    assert (exc.value.model, exc.value.field) == ("res.partner", "odoocli_missing")
+    # Missing at the end of a path: the error names the related model.
+    with pytest.raises(OdooFieldMissingError) as exc:
+        _lenient("res.partner", [["country_id.odoocli_missing", "=", 1]], ["id"])
+    assert (exc.value.model, exc.value.field) == ("res.country", "odoocli_missing")
+    # Opted in, the dotted leaf is removed and the query runs.
+    rows, warnings = _lenient(
+        "res.partner", [["country_id.odoocli_missing", "=", 1]], ["id"], strip_domain=True
+    )
+    assert rows and warnings and warnings[0]["from"] == ["domain"]
+    # res.partner has no ``login``; res.users does. The rejection is about ``fields`` only,
+    # and the path through user_ids stays in the domain. The filter must match a record, or
+    # Odoo never reaches the read that rejects the field.
+    rows, warnings = _lenient("res.partner", [["user_ids.login", "=", "admin"]], ["id", "login"])
+    assert rows and "login" not in rows[0]
+    assert warnings == [{"warning": "invalid_field_removed", "field": "login", "from": ["fields"]}]

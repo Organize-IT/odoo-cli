@@ -6,7 +6,7 @@ from typing import Any
 from typer.testing import CliRunner
 
 from odoocli.cli.app import app
-from tests.conftest import BASE_URL, DB, KEY, LOGIN, FakeOdoo
+from tests.conftest import BASE_URL, DB, KEY, LOGIN, FakeOdoo, RpcFailure
 from tests.test_aliases import MOVE_FIELDS
 
 ENV = {
@@ -96,3 +96,77 @@ def test_group_needs_a_groupby(fake_odoo: FakeOdoo) -> None:
     r = invoke("group", "invoices", "--by", " ")
     assert r.exit_code == 2
     assert "--by needs at least one field" in json.loads(r.stderr)["error"]["message"]
+
+
+# What Odoo 20 answers: its public read_group became the tuple-returning ORM API.
+LAZY_REJECTED = "BaseModel.read_group() got an unexpected keyword argument 'lazy'"
+FORMATTED = [
+    {
+        "partner_id": [4, "Acme"],
+        "__extra_domain": [["partner_id", "=", 4]],
+        "__count": 3,
+        "amount_residual:sum": 1200.0,
+    }
+]
+
+
+def serve_odoo20(fake: FakeOdoo) -> None:
+    serve(fake)
+
+    def reject(args: list[Any], kwargs: dict[str, Any]) -> Any:
+        raise RpcFailure("builtins.TypeError", LAZY_REJECTED)
+
+    fake.on("account.move", "read_group", reject)
+    fake.on("account.move", "formatted_read_group", FORMATTED)
+
+
+def formatted_call(fake: FakeOdoo) -> tuple[str, str, list[Any], dict[str, Any]]:
+    return next(c for c in fake.calls if c[1] == "formatted_read_group")
+
+
+def test_group_falls_back_to_formatted_read_group_on_odoo_20(fake_odoo: FakeOdoo) -> None:
+    serve_odoo20(fake_odoo)
+    r = invoke(
+        "group", "invoices", "--by", "partner_id", "--sum", "amount_residual", "--limit", "5"
+    )
+    assert r.exit_code == 0, r.stderr
+    assert json.loads(r.stdout) == FORMATTED, "Odoo's answer is passed through untouched"
+    _model, _method, args, kwargs = formatted_call(fake_odoo)
+    assert args == [
+        [["move_type", "=", "out_invoice"]],
+        ["partner_id"],
+        ["__count", "amount_residual:sum"],
+    ]
+    assert kwargs == {"limit": 5}
+
+
+def test_group_order_names_the_aggregate_on_odoo_20(fake_odoo: FakeOdoo) -> None:
+    serve_odoo20(fake_odoo)
+    r = invoke(
+        "group",
+        "invoices",
+        "--by",
+        "partner_id",
+        "--sum",
+        "amount_residual",
+        "--order",
+        "amount_residual desc, partner_id",
+        "--offset",
+        "2",
+    )
+    assert r.exit_code == 0, r.stderr
+    kwargs = formatted_call(fake_odoo)[3]
+    assert kwargs == {"offset": 2, "order": "amount_residual:sum desc, partner_id"}
+
+
+def test_group_does_not_fall_back_on_another_error(fake_odoo: FakeOdoo) -> None:
+    serve(fake_odoo)
+
+    def deny(args: list[Any], kwargs: dict[str, Any]) -> Any:
+        raise RpcFailure("odoo.exceptions.AccessError", "not allowed")
+
+    fake_odoo.on("account.move", "read_group", deny)
+    r = invoke("group", "invoices", "--by", "partner_id")
+    assert r.exit_code == 1
+    assert json.loads(r.stderr)["error"]["code"] == "access_error"
+    assert not [c for c in fake_odoo.calls if c[1] == "formatted_read_group"]

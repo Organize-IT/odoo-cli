@@ -26,7 +26,7 @@ subcommand.
 | `odoo search MODEL [-w …] [--fields …] [--order …] [--limit N] [--all] [--ids-only]` | `search_read` |
 | `odoo count MODEL [-w …]` | `search_count`, prints an integer |
 | `odoo read MODEL IDS [--fields …]` | records by id |
-| `odoo group MODEL --by F [--sum F] [--avg F] [-w …]` | `read_group` |
+| `odoo group MODEL --by F [--sum F] [--avg F] [-w …]` | `read_group` (`formatted_read_group` on Odoo 20) |
 
 `MODEL` accepts an [alias](../guides/aliases.md) on every read command.
 
