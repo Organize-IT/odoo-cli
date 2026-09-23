@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -104,18 +105,22 @@ def _parse(tokens: list[Any], pos: int) -> tuple[Any, int]:
     return ("leaf", tok), pos + 1
 
 
-def _mentions(node: Any, bad_field: str) -> bool:
+PathMatcher = Callable[[str], bool]
+"""Decides whether a leaf's field path (``"partner_id.name"``) is one to remove."""
+
+
+def _mentions(node: Any, matches: PathMatcher) -> bool:
     kind = node[0]
     if kind == "leaf":
         term = node[1]
-        return bool(_is_leaf(term) and term[0] == bad_field)
+        return bool(_is_leaf(term) and matches(term[0]))
     if kind == "not":
-        return _mentions(node[1], bad_field)
-    return _mentions(node[2], bad_field) or _mentions(node[3], bad_field)
+        return _mentions(node[1], matches)
+    return _mentions(node[2], matches) or _mentions(node[3], matches)
 
 
-def _serialize(node: Any, bad_field: str) -> Any:
-    """Replace every leaf on ``bad_field`` with "matches everything", then simplify.
+def _serialize(node: Any, matches: PathMatcher) -> Any:
+    """Replace every leaf whose path ``matches`` with "matches everything", then simplify.
 
     Repairing a query may only ever widen it. Two places make that non-obvious:
 
@@ -127,16 +132,16 @@ def _serialize(node: Any, bad_field: str) -> Any:
     kind = node[0]
     if kind == "leaf":
         term = node[1]
-        if _is_leaf(term) and term[0] == bad_field:
+        if _is_leaf(term) and matches(term[0]):
             return _TRUE
         return [term]
     if kind == "not":
-        if _mentions(node[1], bad_field):
+        if _mentions(node[1], matches):
             return _TRUE
-        return [_UNARY_OP, *_serialize(node[1], bad_field)]
+        return [_UNARY_OP, *_serialize(node[1], matches)]
     _, operator, left_node, right_node = node
-    left = _serialize(left_node, bad_field)
-    right = _serialize(right_node, bad_field)
+    left = _serialize(left_node, matches)
+    right = _serialize(right_node, matches)
     if operator == "|":
         if left is _TRUE or right is _TRUE:
             return _TRUE
@@ -150,12 +155,14 @@ def _serialize(node: Any, bad_field: str) -> Any:
     return [operator, *left, *right]
 
 
-def strip_field_from_domain(domain: Any, bad_field: str) -> Any:
-    """Remove every constraint on ``bad_field``, widening the domain and never narrowing it.
+def strip_leaves_from_domain(domain: Any, matches: PathMatcher) -> Any:
+    """Remove every leaf whose field path ``matches``, widening the domain and never narrowing it.
 
-    Every record the original domain matched still matches the result. That is the only
-    property that makes an automatic repair defensible: returning extra rows is visible,
-    losing rows the caller asked for is not.
+    A removed leaf means "matches everything", so every record the original domain matched
+    still matches the result. That is the only property that makes an automatic repair
+    defensible: returning extra rows is visible, losing rows the caller asked for is not.
+    ``matches`` receives the whole path, so a caller can remove ``product_id.detailed_type``
+    when Odoo rejected ``detailed_type`` on ``product.product``.
     """
     if not isinstance(domain, list) or not domain:
         return domain
@@ -164,13 +171,21 @@ def strip_field_from_domain(domain: Any, bad_field: str) -> Any:
         pos = 0
         while pos < len(domain):
             node, pos = _parse(domain, pos)
-            serialized = _serialize(node, bad_field)
+            serialized = _serialize(node, matches)
             if serialized is not _TRUE:
                 cleaned.extend(serialized)
         return cleaned
     except (IndexError, TypeError):
         # Malformed domain: leave it alone rather than risk a wrong filter.
         return domain
+
+
+def strip_field_from_domain(domain: Any, bad_field: str) -> Any:
+    """Remove every constraint on the field named exactly ``bad_field``, only ever widening.
+
+    See ``strip_leaves_from_domain``; dotted paths are matched whole, not by segment.
+    """
+    return strip_leaves_from_domain(domain, lambda path: path == bad_field)
 
 
 # ----- -w DSL -----

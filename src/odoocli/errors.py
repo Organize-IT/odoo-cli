@@ -116,6 +116,9 @@ class OdooFieldMissingError(OdooError):
         self.where = where
         super().__init__(message, code=code, data=data)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {**super().to_dict(), "model": self.model, "field": self.field, "where": self.where}
+
 
 _BY_EXCEPTION_NAME: dict[str, type[OdooError]] = {
     "odoo.exceptions.AccessDenied": OdooAuthError,

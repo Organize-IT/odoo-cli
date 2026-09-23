@@ -214,3 +214,136 @@ async def test_field_named_inside_another_is_not_a_domain_field(fake_odoo: FakeO
         )
     assert rows == [{"id": 1}]
     assert fake_odoo.calls[-1][2] == [[["move_type", "=", "out_invoice"]]]
+
+
+async def test_root_rejection_is_not_matched_by_a_deeper_path_segment(fake_odoo: FakeOdoo) -> None:
+    """``name`` missing on the queried model says nothing about ``product_id.name``."""
+
+    def handler(args: list[Any], kwargs: dict[str, Any]) -> Any:
+        if "name" in kwargs.get("fields", []):
+            raise RpcFailure(
+                "builtins.ValueError", "Invalid field 'name' on model 'sale.order.line'"
+            )
+        return [{"id": 1}]
+
+    fake_odoo.on("sale.order.line", "search_read", handler)
+    warnings: list[dict[str, Any]] = []
+    async with AsyncOdooClient(BASE_URL, DB, LOGIN, KEY) as c:
+        rows = await lenient_search_read(
+            c,
+            "sale.order.line",
+            [["product_id.name", "ilike", "x"]],
+            ["id", "name"],
+            None,
+            0,
+            None,
+            on_warning=warnings.append,
+        )
+    assert rows == [{"id": 1}]
+    assert warnings == [{"warning": "invalid_field_removed", "field": "name", "from": ["fields"]}]
+    assert fake_odoo.calls[-1][2] == [[["product_id.name", "ilike", "x"]]]
+    assert fake_odoo.calls[-1][3]["fields"] == ["id"]
+
+
+async def test_rejection_on_a_related_model_matches_the_deeper_segment(
+    fake_odoo: FakeOdoo,
+) -> None:
+    """A qualified error naming another model points at a path, never at a root field."""
+    fake_odoo.on(
+        "sale.order.line",
+        "search_read",
+        scripted(
+            "product_id.detailed_type",
+            "Invalid field product.product.detailed_type in condition "
+            "('detailed_type', '=', 'product')",
+        ),
+    )
+    async with AsyncOdooClient(BASE_URL, DB, LOGIN, KEY) as c:
+        with pytest.raises(OdooFieldMissingError) as exc:
+            await lenient_search_read(
+                c,
+                "sale.order.line",
+                [["product_id.detailed_type", "=", "product"]],
+                ["id", "detailed_type"],
+                None,
+                0,
+                None,
+            )
+    assert exc.value.model == "product.product"
+    assert exc.value.field == "detailed_type"
+    assert search_reads(fake_odoo) == 1
+
+
+async def test_dotted_leaf_is_stripped_when_opted_in(fake_odoo: FakeOdoo) -> None:
+    """The leaf holding the rejected path goes, widening only; the query then runs."""
+    fake_odoo.on(
+        "sale.order.line",
+        "search_read",
+        scripted(
+            "detailed_type",
+            "Invalid field product.product.detailed_type in condition "
+            "('detailed_type', '=', 'product')",
+        ),
+    )
+    warnings: list[dict[str, Any]] = []
+    async with AsyncOdooClient(BASE_URL, DB, LOGIN, KEY) as c:
+        rows = await lenient_search_read(
+            c,
+            "sale.order.line",
+            [
+                "|",
+                ["product_id.detailed_type", "=", "product"],
+                ["state", "=", "sale"],
+                ["order_id", "!=", False],
+            ],
+            ["id"],
+            None,
+            0,
+            None,
+            strip_domain=True,
+            on_warning=warnings.append,
+        )
+    assert rows == [{"id": 1}]
+    assert warnings == [
+        {"warning": "invalid_field_removed", "field": "detailed_type", "from": ["domain"]}
+    ]
+    assert fake_odoo.calls[-1][2] == [[["order_id", "!=", False]]]
+
+
+async def test_dotted_leaf_rooted_on_the_rejected_field_is_stripped(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on(
+        "res.partner",
+        "search_read",
+        scripted("industry_id", "Invalid field res.partner.industry_id in condition (...)"),
+    )
+    async with AsyncOdooClient(BASE_URL, DB, LOGIN, KEY) as c:
+        rows = await lenient_search_read(
+            c,
+            "res.partner",
+            [["industry_id.name", "=", "x"], ["active", "=", True]],
+            ["id"],
+            None,
+            0,
+            None,
+            strip_domain=True,
+        )
+    assert rows == [{"id": 1}]
+    assert fake_odoo.calls[-1][2] == [[["active", "=", True]]]
+
+
+async def test_field_missing_error_carries_its_payload(fake_odoo: FakeOdoo) -> None:
+    fake_odoo.on(
+        "account.account",
+        "search_read",
+        scripted("account_type", "Invalid field 'account_type' in leaf"),
+    )
+    async with AsyncOdooClient(BASE_URL, DB, LOGIN, KEY) as c:
+        with pytest.raises(OdooFieldMissingError) as exc:
+            await lenient_search_read(
+                c, "account.account", [["account_type", "=", "x"]], ["id"], None, 0, None
+            )
+    d = exc.value.to_dict()
+    assert d["code"] == "field_missing"
+    assert (d["model"], d["field"], d["where"]) == ("account.account", "account_type", "domain")
+    assert d["odoo"]["name"] == "builtins.ValueError"
+    assert d["odoo"]["message"] == "Invalid field 'account_type' in leaf"

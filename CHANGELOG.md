@@ -18,11 +18,30 @@ All notable changes to this project are documented here. The format follows
   [ADR 0008](docs/decisions/0008-domain-repair-is-opt-in.md).
 - The domain check is exact on path segments, so a rejected `type` in `fields` is no longer
   mistaken for a mention of `move_type` in the domain.
+- The domain check reads which model Odoo rejected the field on. A rejection on the queried
+  model only matches the first segment of a path: `name` missing on `sale.order.line` no
+  longer turns `product_id.name` in the domain into an `OdooFieldMissingError`, and `fields`
+  is repaired as before. A qualified rejection on another model
+  (`Invalid field product.product.detailed_type`) only matches deeper segments, and the error
+  names that model. `fields` and `order` are only repaired for a rejection on the queried
+  model.
+
+### Fixed
+
+- With `strip_domain=True` (`--lenient-fields`), a rejected field inside a dotted path
+  (`product_id.detailed_type`, or `industry_id.name` when `industry_id` is gone) was detected
+  but never removed, because stripping compared whole names: the query was replayed
+  unchanged until `retry_exhausted`. The leaf holding the path is now removed, with the same
+  widening-only rules as any other leaf.
+- `OdooFieldMissingError.to_dict()`, which is what the CLI prints on stderr, now carries
+  `model`, `field` and `where`, and the server's error under `odoo` like any other Odoo error.
 
 ### Added
 
 - `OdooFieldMissingError` (exit 2, code `field_missing`) with `.model`, `.field` and `.where`,
   exported from `odoocli`.
+- `domain.strip_leaves_from_domain(domain, matches)`: the widening-only removal behind
+  `strip_field_from_domain`, for a predicate over the leaf's whole field path.
 
 ## [0.5.0] - 2026-09-11
 
