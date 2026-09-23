@@ -33,7 +33,9 @@ docker compose -f docker/odoo-compose.yml down -v
 
 One concern per PR. The body says what changed and why, and what you ran. CI
 runs the unit suite on Python 3.11–3.13 and builds the docs on every PR; the
-Odoo 17/18/19 integration matrix runs on `main` and on tags.
+Odoo 15 to 20 integration matrix runs on `main` and on tags. Odoo 20 has no
+published image yet: `start-odoo.sh` builds it from the commit in
+`docker/odoo20/SHA` (bump that file to move it). `ODOO_PORT` moves the host port.
 
 ## Releasing
 

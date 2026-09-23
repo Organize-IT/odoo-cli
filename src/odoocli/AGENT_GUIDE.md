@@ -111,7 +111,9 @@ odoo cache path|list|clear                  the schema cache
 `MODEL` accepts an alias on every read command. `odoo group` runs `read_group`, so you
 get counts and totals per group without pulling the records:
 `odoo group invoices -w overdue --by partner_id --sum amount_residual`.
-Grouping keys accept a date granularity: `--by invoice_date:month`.
+Grouping keys accept a date granularity: `--by invoice_date:month`. On Odoo 20 it runs
+`formatted_read_group` and passes its answer through: totals are keyed `amount_residual:sum`
+instead of `amount_residual`, and each group's filter is `__extra_domain`.
 
 Conditions (`-w`, repeatable, AND-ed together, combined with `--domain`):
 
@@ -169,7 +171,7 @@ One2many and many2many fields take Odoo commands, written as JSON in `-v` or `--
 5. Many2one values come back as `[id, name]`. Filter on them with the id
    (`-w partner_id=42`) or through a related field (`-w partner_id.name~acme`).
 6. Dates are strings, `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` in UTC.
-7. Field names drift between Odoo 17, 18 and 19 (for example `account.account.company_id`
+7. Field names drift between Odoo 15 and 20 (for example `account.account.company_id`
    became `company_ids`). If a field is rejected, `odoo fields` is the truth.
    `--lenient-fields` on `search` removes rejected fields and retries. It prints the rows and
    then exits 5, because they answer a wider question than the one you asked. Use it to

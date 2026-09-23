@@ -26,5 +26,6 @@ def test_read_safe_methods() -> None:
     assert is_read_safe_method("search_read")
     assert is_read_safe_method("name_search")
     assert is_read_safe_method("read_group")
+    assert is_read_safe_method("formatted_read_group"), "read_group's JSON form on Odoo 19+"
     assert not is_read_safe_method("action_confirm")
     assert not is_read_safe_method("write")

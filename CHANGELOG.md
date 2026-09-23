@@ -3,6 +3,59 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.6.0] - 2026-09-23
+
+### Changed
+
+- **Breaking for library callers:** `lenient_search_read` no longer removes a rejected field
+  from the domain on its own. It raises `OdooFieldMissingError` before replaying anything,
+  unless the caller passes `strip_domain=True`. On Odoo 15, `account.account` has no
+  `account_type`: the repair used to drop the leaf and replay, so a query for cash accounts
+  returned every account and the totals built on it were wrong with nothing failing.
+  Rejected fields in `fields` and `order` are still removed automatically: they change the
+  shape of the rows, not which records come back. The CLI is unchanged: `--lenient-fields`
+  passes `strip_domain=True` and still exits 5. See
+  [ADR 0008](docs/decisions/0008-domain-repair-is-opt-in.md).
+- The domain check is exact on path segments, so a rejected `type` in `fields` is no longer
+  mistaken for a mention of `move_type` in the domain.
+- The domain check reads which model Odoo rejected the field on. A rejection on the queried
+  model only matches the first segment of a path: `name` missing on `sale.order.line` no
+  longer turns `product_id.name` in the domain into an `OdooFieldMissingError`, and `fields`
+  is repaired as before. A qualified rejection on another model
+  (`Invalid field product.product.detailed_type`) only matches deeper segments, and the error
+  names that model. `fields` and `order` are only repaired for a rejection on the queried
+  model.
+
+### Fixed
+
+- With `strip_domain=True` (`--lenient-fields`), a rejected field inside a dotted path
+  (`product_id.detailed_type`, or `industry_id.name` when `industry_id` is gone) was detected
+  but never removed, because stripping compared whole names: the query was replayed
+  unchanged until `retry_exhausted`. The leaf holding the path is now removed, with the same
+  widening-only rules as any other leaf.
+- `OdooFieldMissingError.to_dict()`, which is what the CLI prints on stderr, now carries
+  `model`, `field` and `where`, and the server's error under `odoo` like any other Odoo error.
+- `odoo group` failed on Odoo 20 with `read_group() got an unexpected keyword argument
+  'lazy'`: 20 gave the name `read_group` to the ORM's tuple API. When the server rejects
+  `lazy`, and only then, the command calls `formatted_read_group` and prints its answer as is,
+  so totals are keyed `amount_total:sum` there. `--order` on a totalled field is rewritten to
+  the aggregate spec it requires. Nothing changes on 15 to 19. See
+  [ADR 0009](docs/decisions/0009-group-on-odoo-20.md).
+
+### Added
+
+- The integration suite runs on Odoo 15.0, 16.0, 17.0, 18.0, 19.0 and 20.0 (Community).
+  Odoo 20 has no published image yet: `scripts/start-odoo.sh` builds it from the commit
+  pinned in `docker/odoo20/SHA`, and CI caches the build. New live assertions: every
+  built-in alias and preset filter runs on each version, and `lenient` reads each version's
+  own error messages. `ODOO_PORT` moves the throwaway Odoo off 8069.
+- `formatted_read_group` is a read-safe method: `odoo call` accepts it without `--yes`.
+
+- `OdooFieldMissingError` (exit 2, code `field_missing`) with `.model`, `.field` and `.where`,
+  exported from `odoocli`.
+- `domain.strip_leaves_from_domain(domain, matches)`: the widening-only removal behind
+  `strip_field_from_domain`, for a predicate over the leaf's whole field path.
+
 ## [0.5.0] - 2026-09-11
 
 ### Fixed

@@ -10,6 +10,7 @@ class decides the CLI exit code.
 | `OdooValidationError` | 1 | a business rule rejected the call |
 | `OdooMissingError` | 1 | the record does not exist or is not visible |
 | `OdooUsageError` | 2 | bad arguments, unknown field, unknown alias |
+| `OdooFieldMissingError` | 2 | `lenient_search_read` met a field the server rejects in the domain and was not allowed to remove it (`.model`, `.field`, `.where`) |
 | `OdooConnectionError` | 3 | network, HTTP status, bad URL, rate limit exhausted |
 | `OdooAuthError` | 3 | credentials rejected |
 | `OdooRefusedError` | 4 | a guard refused; Odoo was never called |

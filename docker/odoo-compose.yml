@@ -1,6 +1,8 @@
-# Throwaway Odoo for integration tests. ODOO_VERSION selects the image tag.
+# Throwaway Odoo for integration tests. ODOO_VERSION selects the image tag; ODOO_IMAGE
+# overrides it (Odoo 20 is built from source, see docker/odoo20). ODOO_PORT moves the host port.
 #   scripts/start-odoo.sh            # init db "test" and start
 #   docker compose -f docker/odoo-compose.yml down -v
+name: odoo-cli-integration
 services:
   db:
     image: postgres:16-alpine
@@ -13,7 +15,7 @@ services:
       interval: 2s
       retries: 30
   odoo:
-    image: odoo:${ODOO_VERSION:-17.0}
+    image: ${ODOO_IMAGE:-odoo:${ODOO_VERSION:-17.0}}
     depends_on:
       db:
         condition: service_healthy
@@ -22,5 +24,11 @@ services:
       USER: odoo
       PASSWORD: odoo
     ports:
-      - "8069:8069"
-    command: ["odoo", "-d", "test", "--db-filter=^test$"]
+      - "${ODOO_PORT:-8069}:8069"
+    # No leading "odoo": the official image's entrypoint runs `odoo "$@"` for arguments that
+    # start with a dash, and the source-built image's entrypoint is `odoo` itself. The
+    # connection is repeated as flags because only the official entrypoint reads HOST/USER.
+    # Odoo 20 listens on 127.0.0.1 unless told otherwise, which a published port cannot reach.
+    command:
+      ["-d", "test", "--db-filter=^test$", "--http-interface", "0.0.0.0",
+       "--db_host", "db", "--db_user", "odoo", "--db_password", "odoo"]

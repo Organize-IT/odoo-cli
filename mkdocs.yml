@@ -61,6 +61,8 @@ nav:
       - Validation never invents a refusal: decisions/0005-validation-never-invents-a-refusal.md
       - Aliases are sugar: decisions/0006-aliases-are-sugar.md
       - A repaired query is not a success: decisions/0007-a-repaired-query-is-not-a-success.md
+      - Domain repair is opt-in: decisions/0008-domain-repair-is-opt-in.md
+      - Group on Odoo 20: decisions/0009-group-on-odoo-20.md
   - Reference:
       - Commands: reference/commands.md
       - Python client: reference/client.md

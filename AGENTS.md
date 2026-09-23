@@ -132,7 +132,7 @@ Follow the body ordering above. Parsing that can raise `OdooUsageError` goes
 `emit()` render it; never call `typer.echo` with data yourself.
 
 **An alias.** Only for a model an agent would plausibly name in English, and
-only with clauses that are true on a stock Odoo 17 through 19. If a field it
+only with clauses that are true on a stock Odoo 15 through 20. If a field it
 filters on moved between versions, do not add it. Add a live assertion to
 `tests/integration/test_live.py`.
 
@@ -166,7 +166,7 @@ A change is finished when all of these are true:
    an agent should know.
 6. `CHANGELOG.md` has an entry under the unreleased heading.
 7. Anything touching version-specific Odoo behaviour has a live assertion in
-   `tests/integration/test_live.py`, which runs against 17, 18 and 19.
+   `tests/integration/test_live.py`, which runs against 15 through 20.
 8. A decision with a real trade-off gets an ADR in `docs/decisions/`, and the ADR
    says what would change our mind. A decision recorded without its exit condition
    is an assertion, not a decision.
@@ -179,7 +179,8 @@ rendering and error mapping.
 
 They cannot tell you whether a field still exists in Odoo 19. That is what the
 integration suite is for: it runs the real CLI as a subprocess against a real
-Odoo in Docker, on 17.0, 18.0 and 19.0, on `main` and on tags. Anything that
+Odoo in Docker, on 15.0 through 20.0, on `main` and on tags (20 is built from
+source at the commit in `docker/odoo20/SHA` until an image is published). Anything that
 depends on Odoo's own surface — a model name, a field, an ORM method, an error
 message we parse — belongs there as well as in the unit suite.
 

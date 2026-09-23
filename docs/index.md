@@ -32,8 +32,8 @@ misspelled `mobile`. This tool removes those turns.
 
 ## Compatibility
 
-Python 3.11+. Odoo 17, 18 and 19 are integration-tested in CI on every push to
-`main`; anything exposing `/jsonrpc` with API keys (14+) should work.
+Python 3.11+. Odoo 15, 16, 17, 18, 19 and 20 are integration-tested in CI on every push
+to `main`; anything exposing `/jsonrpc` with API keys (14+) should work.
 
 ## Where to go next
 

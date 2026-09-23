@@ -6,6 +6,7 @@ from odoocli.errors import (
     OdooAccessError,
     OdooAuthError,
     OdooError,
+    OdooFieldMissingError,
     OdooMissingError,
     OdooRefusedError,
     OdooValidationError,
@@ -65,3 +66,14 @@ def test_to_dict_includes_odoo_payload_without_debug() -> None:
         "arguments": ["nope"],
     }
     assert "debug" not in d["odoo"]
+
+
+def test_field_missing_to_dict_names_model_field_and_where() -> None:
+    err = OdooFieldMissingError("gone", model="account.account", field="account_type")
+    assert err.to_dict() == {
+        "code": "field_missing",
+        "message": "gone",
+        "model": "account.account",
+        "field": "account_type",
+        "where": "domain",
+    }

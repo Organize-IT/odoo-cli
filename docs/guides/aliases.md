@@ -80,5 +80,5 @@ how a vendor bill ends up filed as a customer invoice. Aliases without a filter
 
 Aliases and presets live in `src/odoocli/aliases.py`. The bar for adding one is
 in `AGENTS.md`: it has to be a name an agent would plausibly use, and its
-clauses have to be true on a stock Odoo 17 through 19. If a field it filters on
+clauses have to be true on a stock Odoo 15 through 20. If a field it filters on
 moved between versions, it does not go in.

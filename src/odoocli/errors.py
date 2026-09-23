@@ -90,6 +90,36 @@ class OdooRepairedError(OdooError):
     default_code = "result_repaired"
 
 
+class OdooFieldMissingError(OdooError):
+    """A field the query filters on is not available on this server, and was not removed.
+
+    Removing a leaf from a domain widens the query, so the rows would answer another
+    question. Raised instead of repairing unless the caller opted in (``strip_domain=True``).
+    Exit 2 like any other unknown field.
+    """
+
+    exit_code = 2
+    default_code = "field_missing"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        model: str,
+        field: str,
+        where: str = "domain",
+        code: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        self.model = model
+        self.field = field
+        self.where = where
+        super().__init__(message, code=code, data=data)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**super().to_dict(), "model": self.model, "field": self.field, "where": self.where}
+
+
 _BY_EXCEPTION_NAME: dict[str, type[OdooError]] = {
     "odoo.exceptions.AccessDenied": OdooAuthError,
     "odoo.exceptions.AccessError": OdooAccessError,

@@ -44,6 +44,7 @@ READ_SAFE_METHODS: frozenset[str] = frozenset(
         "search_count",
         "read",
         "read_group",
+        "formatted_read_group",
         "fields_get",
         "name_search",
         "name_get",

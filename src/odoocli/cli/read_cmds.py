@@ -21,7 +21,7 @@ from odoocli.cli.values import parse_ids, split_fields
 from odoocli.client import AsyncOdooClient
 from odoocli.config import Profile
 from odoocli.domain import build_domain
-from odoocli.errors import OdooMissingError, OdooRepairedError, OdooUsageError
+from odoocli.errors import OdooError, OdooMissingError, OdooRepairedError, OdooUsageError
 from odoocli.lenient import lenient_search_read
 
 DEFAULT_LIMIT = 80
@@ -175,7 +175,15 @@ def search(
     ) -> list[dict[str, Any]]:
         if lenient:
             return await lenient_search_read(
-                client, target, dom, flds, lim, off, order, on_warning=note_repair
+                client,
+                target,
+                dom,
+                flds,
+                lim,
+                off,
+                order,
+                strip_domain=True,
+                on_warning=note_repair,
             )
         return await client.search_read(target, dom, flds, lim, off, order)
 
@@ -281,19 +289,60 @@ def group(
             domain=dom,
             order=order,
         )
-        kwargs: dict[str, Any] = {"lazy": False}
+        page: dict[str, Any] = {}
         if limit is not None:
-            kwargs["limit"] = limit
+            page["limit"] = limit
         if offset:
-            kwargs["offset"] = offset
-        if order:
-            kwargs["orderby"] = order
-        result = await client.execute(
-            target, "read_group", dom, groupby + aggregates, groupby, **kwargs
-        )
+            page["offset"] = offset
+        try:
+            result = await client.execute(
+                target,
+                "read_group",
+                dom,
+                groupby + aggregates,
+                groupby,
+                lazy=False,
+                **page,
+                **({"orderby": order} if order else {}),
+            )
+        except OdooError as e:
+            if not _read_group_is_gone(e):
+                raise
+            # Odoo 20: the public read_group is the ORM's tuple API, the JSON one is
+            # formatted_read_group. Its answer is passed through as is: aggregate keys
+            # read "amount_total:sum" and the group filter is "__extra_domain".
+            if order:
+                page["order"] = _aggregate_order(order, groupby, aggregates)
+            result = await client.execute(
+                target, "formatted_read_group", dom, groupby, ["__count", *aggregates], **page
+            )
         return list(result) if isinstance(result, list) else []
 
     emit(ctx, run(ctx, go))
+
+
+def _read_group_is_gone(error: OdooError) -> bool:
+    """Whether the server's read_group no longer takes the web client's arguments (Odoo 20)."""
+    name = (error.data or {}).get("name")
+    return name == "builtins.TypeError" and "'lazy'" in error.message
+
+
+def _aggregate_order(order: str, groupby: list[str], aggregates: list[str]) -> str:
+    """Rewrite ``amount_total desc`` as ``amount_total:sum desc`` for formatted_read_group.
+
+    It only orders by a groupby or an aggregate spec; read_group took the bare field name.
+    The first aggregate given for a field wins.
+    """
+    specs: dict[str, str] = {}
+    for spec in aggregates:
+        specs.setdefault(spec.split(":", 1)[0], spec)
+    terms = []
+    for term in (t.strip() for t in order.split(",") if t.strip()):
+        name, _, direction = term.partition(" ")
+        if name not in groupby and name in specs:
+            term = f"{specs[name]} {direction}".strip()
+        terms.append(term)
+    return ", ".join(terms)
 
 
 @app.command()
