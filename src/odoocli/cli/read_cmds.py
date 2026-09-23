@@ -175,7 +175,15 @@ def search(
     ) -> list[dict[str, Any]]:
         if lenient:
             return await lenient_search_read(
-                client, target, dom, flds, lim, off, order, on_warning=note_repair
+                client,
+                target,
+                dom,
+                flds,
+                lim,
+                off,
+                order,
+                strip_domain=True,
+                on_warning=note_repair,
             )
         return await client.search_read(target, dom, flds, lim, off, order)
 

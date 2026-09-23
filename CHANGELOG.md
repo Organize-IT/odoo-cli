@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.6.0] - 2026-09-23
+
+### Changed
+
+- **Breaking for library callers:** `lenient_search_read` no longer removes a rejected field
+  from the domain on its own. It raises `OdooFieldMissingError` before replaying anything,
+  unless the caller passes `strip_domain=True`. On Odoo 15, `account.account` has no
+  `account_type`: the repair used to drop the leaf and replay, so a query for cash accounts
+  returned every account and the totals built on it were wrong with nothing failing.
+  Rejected fields in `fields` and `order` are still removed automatically: they change the
+  shape of the rows, not which records come back. The CLI is unchanged: `--lenient-fields`
+  passes `strip_domain=True` and still exits 5. See
+  [ADR 0008](docs/decisions/0008-domain-repair-is-opt-in.md).
+- The domain check is exact on path segments, so a rejected `type` in `fields` is no longer
+  mistaken for a mention of `move_type` in the domain.
+
+### Added
+
+- `OdooFieldMissingError` (exit 2, code `field_missing`) with `.model`, `.field` and `.where`,
+  exported from `odoocli`.
+
 ## [0.5.0] - 2026-09-11
 
 ### Fixed

@@ -1,4 +1,11 @@
-"""Opt-in search_read that strips fields Odoo rejects and retries (version drift)."""
+"""search_read that repairs fields Odoo rejects and retries (version drift).
+
+Dropping a field from ``fields`` or ``order`` changes the shape of the answer, never which
+records it holds, so it is always repaired. Dropping one from the domain widens the query:
+the caller asked for cash accounts and would get every account. That is only done when the
+caller opts in with ``strip_domain=True``; otherwise ``OdooFieldMissingError`` is raised and
+nothing is replayed.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +15,7 @@ from typing import Any
 
 from odoocli.client import AsyncOdooClient, Domain
 from odoocli.domain import strip_field_from_domain
-from odoocli.errors import OdooError
+from odoocli.errors import OdooError, OdooFieldMissingError
 
 # "Invalid field 'date_planned'" and "Invalid field account.account.deprecated in condition"
 _INVALID_FIELD_RE = re.compile(r"Invalid field '?([\w.]+)'?", re.IGNORECASE)
@@ -20,6 +27,29 @@ _NON_STORED_RE = re.compile(
 )
 
 Warn = Callable[[dict[str, Any]], None]
+
+
+def _in_domain(domain: Domain, bad_field: str) -> bool:
+    """Whether a leaf of ``domain`` names ``bad_field``, directly or as a path segment.
+
+    Exact on segments, so a missing ``type`` is not confused with ``move_type``.
+    """
+    return any(
+        isinstance(term, list | tuple)
+        and len(term) == 3
+        and isinstance(term[0], str)
+        and bad_field in term[0].split(".")
+        for term in domain
+    )
+
+
+def _field_missing(model: str, bad_field: str) -> OdooFieldMissingError:
+    return OdooFieldMissingError(
+        f"Field {model}.{bad_field} is not available in the domain on this Odoo version",
+        model=model,
+        field=bad_field,
+        where="domain",
+    )
 
 
 def _strip_order(order: str, bad_field: str) -> str | None:
@@ -37,9 +67,15 @@ async def lenient_search_read(
     order: str | None,
     *,
     max_retries: int = 3,
+    strip_domain: bool = False,
     on_warning: Warn | None = None,
 ) -> list[dict[str, Any]]:
     """Like ``client.search_read`` but removes rejected fields and retries.
+
+    A rejected field in ``fields`` or ``order`` is removed and the query replayed. A rejected
+    field in the domain raises ``OdooFieldMissingError`` before any replay, unless
+    ``strip_domain`` is true: then its leaves are removed (the domain only ever widens, see
+    ``strip_field_from_domain``) and the rows answer a wider question than the one asked.
 
     Every removal is reported through ``on_warning`` as
     ``{"warning": <kind>, "field": <name>, "from": ["fields" | "domain" | "order", ...]}``.
@@ -54,11 +90,14 @@ async def lenient_search_read(
             invalid = _INVALID_FIELD_RE.search(text)
             if invalid:
                 bad = invalid.group(1).split(".")[-1]
+                in_domain = _in_domain(domain, bad)
+                if in_domain and not strip_domain:
+                    raise _field_missing(model, bad) from e
                 removed: list[str] = []
                 if fields and bad in fields:
                     fields = [f for f in fields if f != bad] or None
                     removed.append("fields")
-                if bad in str(domain):
+                if in_domain:
                     domain = strip_field_from_domain(domain, bad)
                     removed.append("domain")
                 if order and bad in order:
@@ -74,8 +113,11 @@ async def lenient_search_read(
             non_stored = _NON_STORED_RE.search(text)
             if non_stored:
                 bad = (non_stored.group(1) or non_stored.group(2) or "").split(".")[-1]
+                in_domain = bool(bad) and _in_domain(domain, bad)
+                if in_domain and not strip_domain:
+                    raise _field_missing(model, bad) from e
                 removed = []
-                if bad and bad in str(domain):
+                if in_domain:
                     domain = strip_field_from_domain(domain, bad)
                     removed.append("domain")
                 if bad and order and bad in order:

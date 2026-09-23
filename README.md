@@ -227,14 +227,17 @@ async with AsyncOdooClient(url, db, login, key) as odoo:
 ```
 
 Exceptions: `OdooError` (base, `.code`, `.message`, `.data`), `OdooConnectionError`,
-`OdooAuthError`, `OdooAccessError`, `OdooValidationError`, `OdooMissingError`.
+`OdooAuthError`, `OdooAccessError`, `OdooValidationError`, `OdooMissingError`,
+`OdooFieldMissingError`.
 
 Both clients accept `context={...}` (merged into every call; a per-call `context=` keyword
 wins), `verify_ssl=False` and `max_retries`. HTTP 429 is always retried with backoff and
 `Retry-After`; network errors, timeouts and HTTP 5xx are retried only for calls that cannot
 change data, so a `create` that timed out is never replayed. Logs go to the `odoocli.rpc`
-logger. Domain helpers live in `odoocli.domain`, guards in `odoocli.security`, the opt-in
-repair loop in `odoocli.lenient`.
+logger. Domain helpers live in `odoocli.domain`, guards in `odoocli.security`, the repair
+loop in `odoocli.lenient`: `lenient_search_read` drops rejected fields from `fields` and
+`order` on its own, but a rejected field in the domain raises `OdooFieldMissingError` unless
+you pass `strip_domain=True`, because removing a filter widens the query.
 
 ## Development
 

@@ -31,7 +31,10 @@ Logs go to the `odoocli.rpc` logger.
 
 Query helpers live in `odoocli.domain`, guards in `odoocli.security`, the
 schema cache in `odoocli.schema`, aliases and presets in `odoocli.aliases`, and
-the opt-in repair loop in `odoocli.lenient`.
+the repair loop in `odoocli.lenient`. `lenient_search_read` drops a rejected
+field from `fields` and `order` on its own; a rejected field in the domain
+raises `OdooFieldMissingError` unless `strip_domain=True` is passed, because
+removing a filter widens the query (see ADR 0008).
 
 ::: odoocli.client.AsyncOdooClient
 
